@@ -247,6 +247,7 @@ class ExtractionStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
+        session_id: str,
         headless: bool = True,
         prompt_override: str | None = None,
     ) -> List[ExtractedElement]:
@@ -275,6 +276,13 @@ class ExtractionStage(PipelineStageRunner):
             word_count_threshold=1,
             extraction_strategy=llm_strategy,
             cache_mode=CacheMode.BYPASS,
+            session_id=session_id,
+
+            page_timeout=120000,
+
+            wait_until="domcontentloaded",
+
+            delay_before_return_html=0.5,
         )
 
         results = await crawler.arun_many(urls=[module.url], config=crawl_config)
@@ -294,6 +302,7 @@ class RefinementStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
+        session_id: str,
         headless: bool = True,
         prompt_override: str | None = None,
     ) -> List[ExtractedElement]:
@@ -321,6 +330,13 @@ class RefinementStage(PipelineStageRunner):
             word_count_threshold=1,
             extraction_strategy=llm_strategy,
             cache_mode=CacheMode.BYPASS,
+            session_id=session_id,
+
+            page_timeout=120000,
+
+            wait_until="domcontentloaded",
+
+            delay_before_return_html=0.5,
         )
 
         results = await crawler.arun_many(urls=[module.url], config=crawl_config)
@@ -822,7 +838,7 @@ class GenIAOrchestrator:
             self.current_provider,
         )
 
-    async def run_extraction(self, module: Module, headless: bool = True) -> List[ExtractedElement]:
+    async def run_extraction(self, module: Module, session_id: str, headless: bool = True) -> List[ExtractedElement]:
         _require_crawl4ai()
         async with AsyncWebCrawler(config=BrowserConfig(headless=headless)) as crawler:
             return await ExtractionStage(self.llm_provider, self.prompt_manager).execute(
@@ -831,10 +847,11 @@ class GenIAOrchestrator:
                 self.current_api_key,
                 self.current_model,
                 self.current_provider,
+                session_id,
                 headless,
             )
 
-    async def run_refinement(self, module: Module, headless: bool = True) -> List[ExtractedElement]:
+    async def run_refinement(self, module: Module,  session_id: str, headless: bool = True) -> List[ExtractedElement]:
         _require_crawl4ai()
         async with AsyncWebCrawler(config=BrowserConfig(headless=headless)) as crawler:
             return await RefinementStage(self.llm_provider, self.prompt_manager).execute(
@@ -843,6 +860,7 @@ class GenIAOrchestrator:
                 self.current_api_key,
                 self.current_model,
                 self.current_provider,
+                session_id,
                 headless,
             )
 
@@ -1017,9 +1035,16 @@ class GenIAOrchestrator:
             extracted_test = structured.model_copy(deep=True)
             refined_test = structured.model_copy(deep=True)
 
-            browser_config = BrowserConfig(headless=headless)
+            browser_config = BrowserConfig(
+                headless=True,
+                extra_args=[
+                    "--disable-dev-shm-usage",
+                    "--no-sandbox",
+                    "--disable-gpu"
+                ])
             async with AsyncWebCrawler(config=browser_config) as crawler:
                 for idx, module in enumerate(structured.modules, 1):
+                    session_id= "module_" + str(idx)
                     module_start = datetime.now()
                     self._set_session_state(pipeline_id, PipelineStage.EXTRACTION.value)
                     self.push_event(
@@ -1036,6 +1061,7 @@ class GenIAOrchestrator:
                         extraction_api_key,
                         extraction_model,
                         extraction_provider,
+                        session_id,
                         headless,
                         prompt_override=(prompt_overrides or {}).get("extraction"),
                     )
@@ -1064,6 +1090,7 @@ class GenIAOrchestrator:
                         refinement_api_key,
                         refinement_model,
                         refinement_provider,
+                        session_id,
                         headless,
                         prompt_override=(prompt_overrides or {}).get("refinement"),
                     )
