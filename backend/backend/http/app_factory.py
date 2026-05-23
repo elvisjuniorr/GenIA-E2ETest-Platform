@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
-import re
 import tempfile
 from queue import Empty
 import traceback
@@ -49,33 +47,12 @@ def model_to_dict(value: Any) -> Any:
     return value.model_dump() if hasattr(value, "model_dump") else value
 
 
-def _load_allowed_origins() -> list[str]:
-    raw = os.getenv(
-        "FRONTEND_ORIGINS",
-        "http://localhost:5500,https://genia-e2etest-platform.onrender.com,https://genia-e2etest-ai-driven-platform.onrender.com",
-    )
-    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
-    return origins or ["*"]
-
-
-def _is_allowed_origin(origin: str | None) -> bool:
-    if not origin:
-        return False
-    if origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:"):
-        return True
-    if origin == "https://genia-e2etest-platform.onrender.com":
-        return True
-    if origin == "https://genia-e2etest-ai-driven-platform.onrender.com":
-        return True
-    return bool(re.match(r"^https://[a-z0-9-]+(?:\.[a-z0-9-]+)*\.onrender\.com$", origin))
-
-
 def _apply_cors_headers(response, origin: str | None = None) -> Any:
     request_origin = origin or request.headers.get("Origin")
-    if request_origin and _is_allowed_origin(request_origin):
+    if request_origin:
         response.headers["Access-Control-Allow-Origin"] = request_origin
         response.headers["Vary"] = "Origin"
-    elif "*" in _load_allowed_origins():
+    else:
         response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Headers"] = request.headers.get(
         "Access-Control-Request-Headers",
@@ -159,35 +136,22 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = settings.max_upload_size_mb * 1024 * 1024
 
-    # ✅ CORREÇÃO 1: Carregar origins permitidas e usar na configuração CORS
-    allowed_origins = _load_allowed_origins()
-    trace(f"Allowed CORS origins: {allowed_origins}")
-
-    # ✅ CORREÇÃO 2: Configuração CORS robusta
     CORS(
         app,
-        resources={
-            r"/api/*": {
-                "origins": allowed_origins,
-                "methods": ["GET", "POST", "OPTIONS"],
-                "allow_headers": ["Content-Type", "Authorization"],
-                "supports_credentials": False,
-                "max_age": 3600,
-                "send_wildcard": False,
-            }
-        },
+        resources={r"/api/*": {"origins": "*"}},
+        supports_credentials=False,
         vary_header=True,
+        send_wildcard=False,
     )
-    
-    socketio = SocketIO(app, cors_allowed_origins=allowed_origins)
+
+    socketio = SocketIO(app, cors_allowed_origins="*")
     limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["200 per day", "50 per hour"], storage_uri="memory://")
     orchestrator = GenIAOrchestrator(prompts_dir=settings.prompts_dir)
 
     @app.before_request
     def log_request_start():
         request.request_id = str(uuid.uuid4())[:8]
-        origin = request.headers.get("Origin", "no-origin")
-        trace(f"[{request.request_id}] --> {request.method} {request.path} from {request.remote_addr} (origin: {origin})")
+        trace(f"[{request.request_id}] --> {request.method} {request.path} from {request.remote_addr}")
 
     # ✅ CORREÇÃO 3: Simplificar apply_headers - deixar CORS para flask-cors
     @app.after_request
@@ -218,11 +182,13 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
                 "max_upload_size_mb": settings.max_upload_size_mb,
                 "supported_features": [
                     "test_structuring",
-                    "data_extraction",
-                    "test_refinement",
-                    "code_generation",
-                    "validation",
-                    "execution",
+                    "element_extraction",
+                    "selector_refinement",
+                    "script_generation",
+                    "variable_validation",
+                    "manual_validation_pause",
+                    "real_time_logs",
+                    "multi_framework_execution",
                 ],
             }
         ), 200
@@ -230,27 +196,34 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     @app.route("/api/frameworks", methods=["GET"])
     @error_handler
     def get_frameworks():
-        framework = request.args.get("framework", "").strip()
-        if not framework:
-            return jsonify({"frameworks": get_available_frameworks()}), 200
-        languages = get_framework_languages(framework)
-        return jsonify({"framework": framework, "languages": languages}), 200
+        frameworks = {fw: get_framework_languages(fw) for fw in get_available_frameworks()}
+        return jsonify(frameworks), 200
 
-    @app.route("/api/test-case/structure", methods=["POST"])
-    @validate_request_json("test_case", "provider", "model", "api_key")
+    @app.route("/api/pipeline/initialize", methods=["POST"])
+    @validate_request_json("provider", "model", "api_key")
     @error_handler
-    def structure_test_case():
+    def initialize_pipeline():
         data = request.get_json(force=True)
         orchestrator.set_provider(data["provider"], data["api_key"], data["model"], data.get("temperature"))
-        structured = asyncio.run(orchestrator.run_structuring(data["test_case"]))
-        return jsonify({"status": "success", "data": model_to_dict(structured), "logs": orchestrator.execution_logs}), 200
+        return (
+            jsonify(
+                {
+                    "status": "initialized",
+                    "provider": data["provider"],
+                    "model": data["model"],
+                    "temperature": data.get("temperature", 0),
+                }
+            ),
+            200,
+        )
 
-    @app.route("/api/pipeline/restructure", methods=["POST"])
+    @app.route("/api/pipeline/prompts", methods=["GET"])
     @error_handler
-    def restructure():
-        data = request.get_json(force=True)
-        structured = asyncio.run(orchestrator.run_structuring(data["test_case"]))
-        return jsonify({"status": "success", "data": model_to_dict(structured), "logs": orchestrator.execution_logs}), 200
+    def pipeline_prompts():
+        framework = request.args.get("framework")
+        input_mode = request.args.get("input_mode")
+        prompts = orchestrator.prompt_manager.load_prompt_bundle(framework, input_mode)
+        return jsonify({"status": "success", "prompts": prompts}), 200
 
     @app.route("/api/pipeline/extract", methods=["POST"])
     @validate_request_json("structured_json", "urls")
