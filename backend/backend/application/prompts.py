@@ -16,6 +16,7 @@ class PromptManager:
 
         prompt_map = {
             "structuring": "structuring.txt",
+            "structuring_user_history": "structuring_user_history.txt",
             "extraction": "extraction.txt",
             "refinement": "refinement.txt",
             "validation": "validation.txt",
@@ -56,9 +57,10 @@ class PromptManager:
 
         return prompt_file.read_text(encoding="utf-8")
 
-    def load_prompt_bundle(self, framework: str | None = None) -> dict[str, str]:
+    def load_prompt_bundle(self, framework: str | None = None, input_mode: str | None = None) -> dict[str, str]:
+        structuring_key = "structuring_user_history" if input_mode == "user_story" else "structuring"
         bundle = {
-            "structuring": self.load_prompt("structuring"),
+            "structuring": self.load_prompt(structuring_key),
             "extraction": self.load_prompt("extraction"),
             "refinement": self.load_prompt("refinement"),
             "validation": self.load_prompt("validation"),
@@ -67,6 +69,9 @@ class PromptManager:
             "finalization": self.load_prompt("finalization"),
             "refactoring": self.load_prompt("refactoring"),
         }
+
+        if input_mode == "user_story":
+            bundle["structuring_user_history"] = self.load_prompt("structuring_user_history")
 
         if framework:
             bundle["generation"] = self.load_generation_prompt(framework)

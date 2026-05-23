@@ -197,14 +197,15 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     @error_handler
     def initialize_pipeline():
         data = request.get_json(force=True)
-        orchestrator.set_provider(data["provider"], data["api_key"], data["model"])
-        return jsonify({"status": "initialized", "provider": data["provider"], "model": data["model"]}), 200
+        orchestrator.set_provider(data["provider"], data["api_key"], data["model"], data.get("temperature"))
+        return jsonify({"status": "initialized", "provider": data["provider"], "model": data["model"], "temperature": data.get("temperature", 0)}), 200
 
     @app.route("/api/pipeline/prompts", methods=["GET"])
     @error_handler
     def pipeline_prompts():
         framework = request.args.get("framework")
-        prompts = orchestrator.prompt_manager.load_prompt_bundle(framework)
+        input_mode = request.args.get("input_mode")
+        prompts = orchestrator.prompt_manager.load_prompt_bundle(framework, input_mode)
         return jsonify({"status": "success", "prompts": prompts}), 200
 
     @app.route("/api/pipeline/restructure", methods=["POST"])
@@ -256,7 +257,7 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     @error_handler
     def full_pipeline_run():
         data = request.get_json(force=True)
-        orchestrator.set_provider(data["provider"], data["api_key"], data["model"])
+        orchestrator.set_provider(data["provider"], data["api_key"], data["model"], data.get("temperature"))
         results = asyncio.run(
             orchestrator.run_full_pipeline_1(
                 test_case=data["test_case"],
@@ -266,6 +267,10 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
                 pipeline_id=data.get("pipeline_id"),
                 prompt_overrides=data.get("prompt_overrides"),
                 llm_overrides=data.get("llm_overrides"),
+                input_mode=data.get("input_mode", "test_case"),
+                user_story_content=data.get("user_story_content"),
+                user_story_filename=data.get("user_story_filename"),
+                manual_urls=data.get("manual_urls") or [],
             )
         )
         return jsonify(results), 200 if results.get("status") != "error" else 500
@@ -275,7 +280,7 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     @error_handler
     def run_until_validation():
         data = request.get_json(force=True)
-        orchestrator.set_provider(data["provider"], data["api_key"], data["model"])
+        orchestrator.set_provider(data["provider"], data["api_key"], data["model"], data.get("temperature"))
         result = asyncio.run(
             orchestrator.run_full_pipeline_1(
                 test_case=data["test_case"],
@@ -287,6 +292,10 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
                 pipeline_id=data.get("pipeline_id"),
                 prompt_overrides=data.get("prompt_overrides"),
                 llm_overrides=data.get("llm_overrides"),
+                input_mode=data.get("input_mode", "test_case"),
+                user_story_content=data.get("user_story_content"),
+                user_story_filename=data.get("user_story_filename"),
+                manual_urls=data.get("manual_urls") or [],
             )
         )
         return jsonify(result)

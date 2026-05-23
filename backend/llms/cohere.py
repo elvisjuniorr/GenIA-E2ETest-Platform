@@ -22,7 +22,8 @@ class CohereProvider:
         self,
         api_key,
         model,
-        prompt
+        prompt,
+        temperature=0.0
     ):
 
         client = cohere.Client(
@@ -31,7 +32,8 @@ class CohereProvider:
 
         response = client.chat(
             model=model,
-            message=prompt
+            message=prompt,
+            temperature=temperature
         )
 
         return response.text
@@ -40,13 +42,15 @@ class CohereProvider:
         self,
         api_key,
         model,
-        prompt
+        prompt,
+        temperature=0.0
     ):
 
         text = self.generate_text(
             api_key,
             model,
-            prompt
+            prompt,
+            temperature=temperature
         )
 
         try:

@@ -1,4 +1,5 @@
 from google import genai
+from google.genai import types
 import json
 import re
 
@@ -9,7 +10,8 @@ class GeminiProvider:
         self,
         api_key,
         model,
-        prompt
+        prompt,
+        temperature=0.0
     ):
 
         client = genai.Client(
@@ -18,7 +20,8 @@ class GeminiProvider:
 
         response = client.models.generate_content(
             model=model,
-            contents=prompt
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=temperature)
         )
 
         return response.text
@@ -27,13 +30,15 @@ class GeminiProvider:
         self,
         api_key,
         model,
-        prompt
+        prompt,
+        temperature=0.0
     ):
 
         text = self.generate_text(
             api_key,
             model,
-            prompt
+            prompt,
+            temperature=temperature
         )
 
         # Remove markdown

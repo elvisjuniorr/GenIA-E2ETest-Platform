@@ -22,7 +22,8 @@ class AnthropicProvider:
         self,
         api_key,
         model,
-        prompt
+        prompt,
+        temperature=0.0
     ):
 
         client = anthropic.Anthropic(
@@ -32,6 +33,7 @@ class AnthropicProvider:
         response = client.messages.create(
             model=model,
             max_tokens=4000,
+            temperature=temperature,
             messages=[
                 {
                     "role": "user",
@@ -46,13 +48,15 @@ class AnthropicProvider:
         self,
         api_key,
         model,
-        prompt
+        prompt,
+        temperature=0.0
     ):
 
         text = self.generate_text(
             api_key,
             model,
-            prompt
+            prompt,
+            temperature=temperature
         )
 
         try:

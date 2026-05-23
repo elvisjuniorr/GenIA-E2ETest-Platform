@@ -22,7 +22,8 @@ class OpenAIProvider:
         self,
         api_key,
         model,
-        prompt
+        prompt,
+        temperature=0.0
     ):
 
         client = OpenAI(
@@ -36,7 +37,8 @@ class OpenAIProvider:
                     "role": "system",
                     "content": prompt
                 }
-            ]
+            ],
+            temperature=temperature,
         )
 
         return response.choices[0].message.content
@@ -45,13 +47,15 @@ class OpenAIProvider:
         self,
         api_key,
         model,
-        prompt
+        prompt,
+        temperature=0.0
     ):
 
         text = self.generate_text(
             api_key,
             model,
-            prompt
+            prompt,
+            temperature=temperature
         )
 
         try:

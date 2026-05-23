@@ -251,14 +251,34 @@ class StructuringStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
+        temperature: float = 0.0,
+        input_mode: str = "test_case",
+        user_story_content: str | None = None,
+        user_story_filename: str | None = None,
+        manual_urls: list[str] | None = None,
         prompt_override: str | None = None,
     ) -> TestCase:
-        prompt = prompt_override or self.prompt_manager.load_prompt("structuring")
+        prompt_key = "structuring_user_history" if input_mode == "user_story" else "structuring"
+        prompt = prompt_override or self.prompt_manager.load_prompt(prompt_key)
         final_prompt = _append_context_block(
-            _render_prompt(prompt, Test_Case=test_case, test_case=test_case),
-            {"test_case": test_case},
+            _render_prompt(
+                prompt,
+                Test_Case=test_case,
+                test_case=test_case,
+                input_mode=input_mode,
+                user_story_content=user_story_content or "",
+                user_story_filename=user_story_filename or "",
+                manual_urls=manual_urls or [],
+            ),
+            {
+                "test_case": test_case,
+                "input_mode": input_mode,
+                "user_story_content": user_story_content or "",
+                "user_story_filename": user_story_filename or "",
+                "manual_urls": manual_urls or [],
+            },
         )
-        result = self.llm.generate_json(api_key, model, final_prompt)
+        result = self.llm.generate_json(api_key, model, final_prompt, temperature=temperature)
         return TestCase(**result)
 
 
@@ -270,6 +290,7 @@ class ExtractionStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
+        temperature: float = 0.0,
         headless: bool = True,
         prompt_override: str | None = None,
     ) -> List[ExtractedElement]:
@@ -289,7 +310,7 @@ class ExtractionStage(PipelineStageRunner):
             schema=ExtractedElement.model_json_schema(),
             extraction_type="schema",
             input_format="html",
-            extra_args={"temperature": 0.0},
+            extra_args={"temperature": temperature},
             instruction=final_prompt,
         )
 
@@ -328,6 +349,7 @@ class RefinementStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
+        temperature: float = 0.0,
         headless: bool = True,
         prompt_override: str | None = None,
     ) -> List[ExtractedElement]:
@@ -350,7 +372,7 @@ class RefinementStage(PipelineStageRunner):
                 "source_html": module.source_html or "",
             },
         )
-        raw = self.llm.generate_json(api_key, model, final_prompt)
+        raw = self.llm.generate_json(api_key, model, final_prompt, temperature=temperature)
         return _normalize_extracted_elements(raw)
 
 
@@ -363,6 +385,7 @@ class GenerationStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
+        temperature: float = 0.0,
         prompt_override: str | None = None,
     ) -> str:
         prompt_template = prompt_override or self.prompt_manager.load_generation_prompt(framework)
@@ -380,7 +403,7 @@ class GenerationStage(PipelineStageRunner):
                 "test_case": test_case,
             },
         )
-        return self.llm.generate_text(api_key, model, final_prompt)
+        return self.llm.generate_text(api_key, model, final_prompt, temperature=temperature)
 
 
 class ValidationStage(PipelineStageRunner):
@@ -391,6 +414,7 @@ class ValidationStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
+        temperature: float = 0.0,
         prompt_override: str | None = None,
     ) -> Dict[str, Any]:
         prompt = prompt_override or self.prompt_manager.load_prompt("validation")
@@ -416,7 +440,7 @@ class ValidationStage(PipelineStageRunner):
                 },
             },
         )
-        variables_raw = self.llm.generate_json(api_key, model, final_prompt)
+        variables_raw = self.llm.generate_json(api_key, model, final_prompt, temperature=temperature)
         return self._normalize_variables(variables_raw)
 
     def _normalize_variables(self, raw_variables: Any) -> Dict[str, Any]:
@@ -493,6 +517,7 @@ class ConfirmationStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
+        temperature: float = 0.0,
         prompt_override: str | None = None,
     ) -> str:
         prompt = prompt_override or self.prompt_manager.load_prompt("confirmation")
@@ -516,7 +541,7 @@ class ConfirmationStage(PipelineStageRunner):
                 "validation_changes": manual_changes,
             },
         )
-        return self.llm.generate_text(api_key, model, final_prompt)
+        return self.llm.generate_text(api_key, model, final_prompt, temperature=temperature)
 
 
 class ExecutionStage(PipelineStageRunner):
@@ -541,6 +566,7 @@ class HomologationStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
+        temperature: float = 0.0,
         prompt_override: str | None = None,
     ) -> Dict[str, Any]:
         prompt = prompt_override or self.prompt_manager.load_prompt("homologation")
@@ -580,7 +606,7 @@ class HomologationStage(PipelineStageRunner):
                 "generated_script": script,
             },
         )
-        result = self.llm.generate_json(api_key, model, final_prompt)
+        result = self.llm.generate_json(api_key, model, final_prompt, temperature=temperature)
         return _json_safe(result)
 
 
@@ -591,6 +617,7 @@ class FinalizationStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
+        temperature: float = 0.0,
         prompt_override: str | None = None,
     ) -> Dict[str, Any]:
         prompt = prompt_override or self.prompt_manager.load_prompt("finalization")
@@ -625,7 +652,7 @@ class FinalizationStage(PipelineStageRunner):
             logs=payload.get("logs"),
             timeline=payload.get("timeline"),
         )
-        result = self.llm.generate_json(api_key, model, final_prompt)
+        result = self.llm.generate_json(api_key, model, final_prompt, temperature=temperature)
         return _json_safe(result)
 
 
@@ -639,6 +666,7 @@ class RefactoringStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
+        temperature: float = 0.0,
         prompt_override: str | None = None,
     ) -> Dict[str, Any]:
         prompt = prompt_override or self.prompt_manager.load_prompt("refactoring")
@@ -683,7 +711,7 @@ class RefactoringStage(PipelineStageRunner):
                 "final_report": final_report,
             },
         )
-        result = self.llm.generate_json(api_key, model, final_prompt)
+        result = self.llm.generate_json(api_key, model, final_prompt, temperature=temperature)
         return _json_safe(result)
 
 
@@ -772,20 +800,30 @@ class GenIAOrchestrator:
         self.current_provider = ""
         self.current_model = ""
         self.current_api_key = ""
+        self.current_temperature = 0.0
         self._session_lock = threading.Lock()
+        self._pipeline_lock = threading.Lock()
 
-    def set_provider(self, provider: str, api_key: str, model: str) -> None:
+    def set_provider(self, provider: str, api_key: str, model: str, temperature: float | None = None) -> None:
         self.llm_provider = LLMFactory.get_provider(provider)
         self.current_provider = provider
         self.current_model = model
         self.current_api_key = api_key
+        self.current_temperature = float(temperature if temperature is not None else self.current_temperature or 0.0)
 
-    def _resolve_stage_llm(self, stage: str, llm_overrides: Dict[str, Any] | None = None) -> tuple[str, str, str]:
+    def _resolve_stage_llm(self, stage: str, llm_overrides: Dict[str, Any] | None = None) -> tuple[str, str, str, float]:
         override = (llm_overrides or {}).get(stage) or {}
         provider = override.get("provider") or self.current_provider
         model = override.get("model") or self.current_model
         api_key = override.get("apiKey") or override.get("api_key") or self.current_api_key
-        return provider, model, api_key
+        temperature = override.get("temperature")
+        if temperature is None:
+            temperature = self.current_temperature
+        try:
+            temperature = float(temperature)
+        except (TypeError, ValueError):
+            temperature = float(self.current_temperature or 0.0)
+        return provider, model, api_key, temperature
 
     def _create_session(self, pipeline_id: str, **data: Any) -> dict[str, Any]:
         with self._session_lock:
@@ -889,15 +927,36 @@ class GenIAOrchestrator:
             return "info"
         return "info"
 
-    async def run_structuring(self, test_case: str) -> TestCase:
+    async def run_structuring(
+        self,
+        test_case: str,
+        input_mode: str = "test_case",
+        user_story_content: str | None = None,
+        user_story_filename: str | None = None,
+        manual_urls: list[str] | None = None,
+        prompt_override: str | None = None,
+        temperature: float | None = None,
+    ) -> TestCase:
         return await StructuringStage(self.llm_provider, self.prompt_manager).execute(
             test_case,
             self.current_api_key,
             self.current_model,
             self.current_provider,
+            temperature=temperature if temperature is not None else self.current_temperature,
+            input_mode=input_mode,
+            user_story_content=user_story_content,
+            user_story_filename=user_story_filename,
+            manual_urls=manual_urls,
+            prompt_override=prompt_override,
         )
 
-    async def run_extraction(self, module: Module, headless: bool = True) -> List[ExtractedElement]:
+    async def run_extraction(
+        self,
+        module: Module,
+        headless: bool = True,
+        temperature: float | None = None,
+        prompt_override: str | None = None,
+    ) -> List[ExtractedElement]:
         _require_crawl4ai()
         async with AsyncWebCrawler(config=BrowserConfig(headless=headless)) as crawler:
             return await ExtractionStage(self.llm_provider, self.prompt_manager).execute(
@@ -906,10 +965,18 @@ class GenIAOrchestrator:
                 self.current_api_key,
                 self.current_model,
                 self.current_provider,
-                headless,
+                temperature=temperature if temperature is not None else self.current_temperature,
+                headless=headless,
+                prompt_override=prompt_override,
             )
 
-    async def run_refinement(self, module: Module, headless: bool = True) -> List[ExtractedElement]:
+    async def run_refinement(
+        self,
+        module: Module,
+        headless: bool = True,
+        temperature: float | None = None,
+        prompt_override: str | None = None,
+    ) -> List[ExtractedElement]:
         _require_crawl4ai()
         async with AsyncWebCrawler(config=BrowserConfig(headless=headless)) as crawler:
             return await RefinementStage(self.llm_provider, self.prompt_manager).execute(
@@ -918,10 +985,19 @@ class GenIAOrchestrator:
                 self.current_api_key,
                 self.current_model,
                 self.current_provider,
-                headless,
+                temperature=temperature if temperature is not None else self.current_temperature,
+                headless=headless,
+                prompt_override=prompt_override,
             )
 
-    async def run_generation(self, test_case: TestCase, framework: str, language: str) -> str:
+    async def run_generation(
+        self,
+        test_case: TestCase,
+        framework: str,
+        language: str,
+        temperature: float | None = None,
+        prompt_override: str | None = None,
+    ) -> str:
         return await GenerationStage(self.llm_provider, self.prompt_manager).execute(
             test_case,
             framework,
@@ -929,31 +1005,43 @@ class GenIAOrchestrator:
             self.current_api_key,
             self.current_model,
             self.current_provider,
+            temperature=temperature if temperature is not None else self.current_temperature,
+            prompt_override=prompt_override,
         )
 
-    async def run_validation(self, script: str, test_case: TestCase) -> Dict[str, Any]:
+    async def run_validation(
+        self,
+        script: str,
+        test_case: TestCase,
+        temperature: float | None = None,
+        prompt_override: str | None = None,
+    ) -> Dict[str, Any]:
         return await ValidationStage(self.llm_provider, self.prompt_manager).execute(
             script,
             test_case,
             self.current_api_key,
             self.current_model,
             self.current_provider,
+            temperature=temperature if temperature is not None else self.current_temperature,
+            prompt_override=prompt_override,
         )
 
     async def run_confirmation(
         self,
         refined_script: str,
         manual_changes: Dict[str, Any],
+        temperature: float | None = None,
         prompt_override: str | None = None,
         llm_override: Dict[str, Any] | None = None,
     ) -> str:
-        provider, model, api_key = self._resolve_stage_llm("confirmation", {"confirmation": llm_override} if llm_override else None)
+        provider, model, api_key, resolved_temperature = self._resolve_stage_llm("confirmation", {"confirmation": llm_override} if llm_override else None)
         return await ConfirmationStage(self.llm_provider, self.prompt_manager).execute(
             refined_script,
             manual_changes,
             api_key,
             model,
             provider,
+            temperature=temperature if temperature is not None else resolved_temperature,
             prompt_override=prompt_override,
         )
 
@@ -972,10 +1060,11 @@ class GenIAOrchestrator:
         validation_data: Dict[str, Any],
         manual_changes: Dict[str, Any],
         script: str,
+        temperature: float | None = None,
         prompt_override: str | None = None,
         llm_override: Dict[str, Any] | None = None,
     ):
-        provider, model, api_key = self._resolve_stage_llm("homologation", {"homologation": llm_override} if llm_override else None)
+        provider, model, api_key, resolved_temperature = self._resolve_stage_llm("homologation", {"homologation": llm_override} if llm_override else None)
         return await HomologationStage(self.llm_provider, self.prompt_manager).execute(
             execution_result,
             refined,
@@ -985,21 +1074,24 @@ class GenIAOrchestrator:
             api_key,
             model,
             provider,
+            temperature=temperature if temperature is not None else resolved_temperature,
             prompt_override=prompt_override,
         )
 
     async def run_finalization(
         self,
         payload: Dict[str, Any],
+        temperature: float | None = None,
         prompt_override: str | None = None,
         llm_override: Dict[str, Any] | None = None,
     ):
-        provider, model, api_key = self._resolve_stage_llm("finalization", {"finalization": llm_override} if llm_override else None)
+        provider, model, api_key, resolved_temperature = self._resolve_stage_llm("finalization", {"finalization": llm_override} if llm_override else None)
         return await FinalizationStage(self.llm_provider, self.prompt_manager).execute(
             payload,
             api_key,
             model,
             provider,
+            temperature=temperature if temperature is not None else resolved_temperature,
             prompt_override=prompt_override,
         )
 
@@ -1009,10 +1101,11 @@ class GenIAOrchestrator:
         execution_result: ExecutionResult,
         homologation: Dict[str, Any],
         final_report: Dict[str, Any],
+        temperature: float | None = None,
         prompt_override: str | None = None,
         llm_override: Dict[str, Any] | None = None,
     ):
-        provider, model, api_key = self._resolve_stage_llm("refactoring", {"refactoring": llm_override} if llm_override else None)
+        provider, model, api_key, resolved_temperature = self._resolve_stage_llm("refactoring", {"refactoring": llm_override} if llm_override else None)
         return await RefactoringStage(self.llm_provider, self.prompt_manager).execute(
             original_script,
             execution_result,
@@ -1021,6 +1114,7 @@ class GenIAOrchestrator:
             api_key,
             model,
             provider,
+            temperature=temperature if temperature is not None else resolved_temperature,
             prompt_override=prompt_override,
         )
 
@@ -1035,226 +1129,249 @@ class GenIAOrchestrator:
         pipeline_id: str | None = None,
         prompt_overrides: Dict[str, str] | None = None,
         llm_overrides: Dict[str, Any] | None = None,
+        input_mode: str = "test_case",
+        user_story_content: str | None = None,
+        user_story_filename: str | None = None,
+        manual_urls: list[str] | None = None,
     ) -> Dict[str, Any]:
-        self.execution_logs = []
-        start_time = datetime.now()
-        pipeline_id = pipeline_id or str(uuid.uuid4())
+        with self._pipeline_lock:
+            self.execution_logs = []
+            start_time = datetime.now()
+            pipeline_id = pipeline_id or str(uuid.uuid4())
 
-        try:
-            _require_crawl4ai()
-            session = self._create_session(
-                pipeline_id,
-                initial_input=test_case,
-                framework=framework,
-                language=language,
-                test_name=test_name,
-                headless=headless,
-                attempt=attempt,
-                prompt_overrides=prompt_overrides or {},
-                llm_overrides=llm_overrides or {},
-            )
+            try:
+                _require_crawl4ai()
+                session = self._create_session(
+                    pipeline_id,
+                    initial_input=test_case,
+                    input_mode=input_mode,
+                    user_story_content=user_story_content,
+                    user_story_filename=user_story_filename,
+                    manual_urls=manual_urls or [],
+                    framework=framework,
+                    language=language,
+                    test_name=test_name,
+                    headless=headless,
+                    attempt=attempt,
+                    prompt_overrides=prompt_overrides or {},
+                    llm_overrides=llm_overrides or {},
+                )
 
-            self.push_event(
-                "PIPELINE_START",
-                "logs",
-                {
+                self.push_event(
+                    "PIPELINE_START",
+                    "logs",
+                    {
+                        "pipeline_id": pipeline_id,
+                        "test_name": test_name,
+                        "framework": framework,
+                        "language": language,
+                        "attempt": attempt,
+                        "timestamp": start_time.isoformat(),
+                    },
+                    pipeline_id,
+                )
+
+                self._set_session_state(pipeline_id, PipelineStage.STRUCTURING.value)
+                self.push_event("STAGE_START", "structuring", {"stage": PipelineStage.STRUCTURING.value}, pipeline_id)
+                struct_provider, struct_model, struct_api_key, struct_temperature = self._resolve_stage_llm("structuring", llm_overrides)
+                structured = await StructuringStage(self.llm_provider, self.prompt_manager).execute(
+                    test_case,
+                    struct_api_key,
+                    struct_model,
+                    struct_provider,
+                    temperature=struct_temperature,
+                    input_mode=input_mode,
+                    user_story_content=user_story_content,
+                    user_story_filename=user_story_filename,
+                    manual_urls=manual_urls or [],
+                    prompt_override=(prompt_overrides or {}).get("structuring"),
+                )
+                self.push_event(
+                    "STAGE_DONE",
+                    "structuring",
+                    {
+                        "test_case": structured.testCase,
+                        "modules": len(structured.modules),
+                        "structured": structured.model_dump(),
+                    },
+                    pipeline_id,
+                )
+
+                extracted_test = structured.model_copy(deep=True)
+                refined_test = structured.model_copy(deep=True)
+
+                browser_config = BrowserConfig(headless=headless)
+                async with AsyncWebCrawler(config=browser_config) as crawler:
+                    for idx, module in enumerate(structured.modules, 1):
+                        module_start = datetime.now()
+                        self._set_session_state(pipeline_id, PipelineStage.EXTRACTION.value)
+                        self.push_event(
+                            "MODULE_START",
+                            "extraction",
+                            {"index": idx, "total": len(structured.modules), "url": module.url},
+                            pipeline_id,
+                        )
+
+                        extraction_provider, extraction_model, extraction_api_key, extraction_temperature = self._resolve_stage_llm("extraction", llm_overrides)
+                        extracted_elements = await ExtractionStage(self.llm_provider, self.prompt_manager).execute(
+                            crawler,
+                            module,
+                            extraction_api_key,
+                            extraction_model,
+                            extraction_provider,
+                            temperature=extraction_temperature,
+                            headless=headless,
+                            prompt_override=(prompt_overrides or {}).get("extraction"),
+                        )
+                        extracted_test.modules[idx - 1].source_html = getattr(module, "source_html", None)
+                        extracted_test.modules[idx - 1].extracted_data = extracted_elements
+                        extracted_test.modules[idx - 1] = _map_extracted_data_to_steps(extracted_test.modules[idx - 1])
+                        self.push_event(
+                            "EXTRACTION_DONE",
+                            "extraction",
+                            {
+                                "index": idx,
+                                "total": len(structured.modules),
+                                "module": module.url,
+                                "elements_count": len(extracted_elements),
+                                "elements": _model_dump_list(extracted_elements),
+                                "extracted_snapshot": _sanitize_module_tree(extracted_test),
+                                "duration_ms": (datetime.now() - module_start).total_seconds() * 1000,
+                            },
+                            pipeline_id,
+                        )
+
+                        self._set_session_state(pipeline_id, PipelineStage.REFINEMENT.value)
+                        refinement_provider, refinement_model, refinement_api_key, refinement_temperature = self._resolve_stage_llm("refinement", llm_overrides)
+                        refined_test.modules[idx - 1].source_html = getattr(extracted_test.modules[idx - 1], "source_html", None)
+                        refined_test.modules[idx - 1].extracted_data = extracted_elements
+                        refined_elements = await RefinementStage(self.llm_provider, self.prompt_manager).execute(
+                            crawler,
+                            extracted_test.modules[idx - 1],
+                            refinement_api_key,
+                            refinement_model,
+                            refinement_provider,
+                            temperature=refinement_temperature,
+                            headless=headless,
+                            prompt_override=(prompt_overrides or {}).get("refinement"),
+                        )
+                        refined_test.modules[idx - 1].extracted_data = refined_elements
+                        refined_test.modules[idx - 1] = _map_extracted_data_to_steps(refined_test.modules[idx - 1])
+                        self.push_event(
+                            "REFINEMENT_DONE",
+                            "refinement",
+                            {
+                                "index": idx,
+                                "total": len(structured.modules),
+                                "module": module.url,
+                                "elements_count": len(refined_elements),
+                                "elements": _model_dump_list(refined_elements),
+                                "refined_snapshot": _sanitize_module_tree(refined_test),
+                            },
+                            pipeline_id,
+                        )
+
+                self._set_session_state(pipeline_id, PipelineStage.GENERATION.value)
+                self.push_event("STAGE_START", "generation", {"stage": PipelineStage.GENERATION.value}, pipeline_id)
+                generation_provider, generation_model, generation_api_key, generation_temperature = self._resolve_stage_llm("generation", llm_overrides)
+                script = await GenerationStage(self.llm_provider, self.prompt_manager).execute(
+                    refined_test,
+                    framework,
+                    language,
+                    generation_api_key,
+                    generation_model,
+                    generation_provider,
+                    temperature=generation_temperature,
+                    prompt_override=(prompt_overrides or {}).get("generation"),
+                )
+                self.push_event(
+                    "STAGE_DONE",
+                    "generation",
+                    {"script_length": len(script), "script_preview": script[:500], "script": script},
+                    pipeline_id,
+                )
+
+                self._set_session_state(pipeline_id, PipelineStage.VALIDATION.value)
+                self.push_event("STAGE_START", "validation", {"stage": PipelineStage.VALIDATION.value}, pipeline_id)
+                validation_provider, validation_model, validation_api_key, validation_temperature = self._resolve_stage_llm("validation", llm_overrides)
+                validation = await ValidationStage(self.llm_provider, self.prompt_manager).execute(
+                    script,
+                    refined_test,
+                    validation_api_key,
+                    validation_model,
+                    validation_provider,
+                    temperature=validation_temperature,
+                    prompt_override=(prompt_overrides or {}).get("validation"),
+                )
+                self.push_event(
+                    "STAGE_DONE",
+                    "validation",
+                    {
+                        "validation": validation,
+                        "detected_inputs": validation.get("detected_inputs", []),
+                        "editable_fields": validation.get("editable_fields", []),
+                        "generated_script": script,
+                    },
+                    pipeline_id,
+                )
+
+                session["data"].update(
+                    {
+                        "structured": structured.model_dump(),
+                        "extracted": _sanitize_module_tree(extracted_test),
+                        "refined": _sanitize_module_tree(refined_test),
+                        "script": script,
+                        "validation": validation,
+                        "test_case": test_case,
+                        "input_mode": input_mode,
+                        "user_story_content": user_story_content,
+                        "user_story_filename": user_story_filename,
+                        "manual_urls": manual_urls or [],
+                        "framework": framework,
+                        "language": language,
+                        "test_name": test_name,
+                        "headless": headless,
+                        "attempt": attempt,
+                        "pipeline_id": pipeline_id,
+                        "prompt_overrides": prompt_overrides or {},
+                        "llm_overrides": llm_overrides or {},
+                    }
+                )
+                session["state"] = "WAITING_VALIDATION"
+                session["paused_at"] = PipelineStage.VALIDATION.value
+                session["updated_at"] = _iso_now()
+                self.push_event(
+                    "PIPELINE_PAUSED",
+                    "logs",
+                    {
+                        "pipeline_id": pipeline_id,
+                        "paused_at": PipelineStage.VALIDATION.value,
+                    },
+                    pipeline_id,
+                )
+
+                return {
+                    "status": "waiting_validation",
                     "pipeline_id": pipeline_id,
-                    "test_name": test_name,
-                    "framework": framework,
-                    "language": language,
-                    "attempt": attempt,
-                    "timestamp": start_time.isoformat(),
-                },
-                pipeline_id,
-            )
-
-            self._set_session_state(pipeline_id, PipelineStage.STRUCTURING.value)
-            self.push_event("STAGE_START", "structuring", {"stage": PipelineStage.STRUCTURING.value}, pipeline_id)
-            struct_provider, struct_model, struct_api_key = self._resolve_stage_llm("structuring", llm_overrides)
-            structured = await StructuringStage(self.llm_provider, self.prompt_manager).execute(
-                test_case,
-                struct_api_key,
-                struct_model,
-                struct_provider,
-                prompt_override=(prompt_overrides or {}).get("structuring"),
-            )
-            self.push_event(
-                "STAGE_DONE",
-                "structuring",
-                {
-                    "test_case": structured.testCase,
-                    "modules": len(structured.modules),
-                    "structured": structured.model_dump(),
-                },
-                pipeline_id,
-            )
-
-            extracted_test = structured.model_copy(deep=True)
-            refined_test = structured.model_copy(deep=True)
-
-            browser_config = BrowserConfig(headless=headless)
-            async with AsyncWebCrawler(config=browser_config) as crawler:
-                for idx, module in enumerate(structured.modules, 1):
-                    module_start = datetime.now()
-                    self._set_session_state(pipeline_id, PipelineStage.EXTRACTION.value)
-                    self.push_event(
-                        "MODULE_START",
-                        "extraction",
-                        {"index": idx, "total": len(structured.modules), "url": module.url},
-                        pipeline_id,
-                    )
-
-                    extraction_provider, extraction_model, extraction_api_key = self._resolve_stage_llm("extraction", llm_overrides)
-                    extracted_elements = await ExtractionStage(self.llm_provider, self.prompt_manager).execute(
-                        crawler,
-                        module,
-                        extraction_api_key,
-                        extraction_model,
-                        extraction_provider,
-                        headless,
-                        prompt_override=(prompt_overrides or {}).get("extraction"),
-                    )
-                    extracted_test.modules[idx - 1].source_html = getattr(module, "source_html", None)
-                    extracted_test.modules[idx - 1].extracted_data = extracted_elements
-                    extracted_test.modules[idx - 1] = _map_extracted_data_to_steps(extracted_test.modules[idx - 1])
-                    self.push_event(
-                        "EXTRACTION_DONE",
-                        "extraction",
-                        {
-                            "index": idx,
-                            "total": len(structured.modules),
-                            "module": module.url,
-                            "elements_count": len(extracted_elements),
-                            "elements": _model_dump_list(extracted_elements),
-                            "extracted_snapshot": _sanitize_module_tree(extracted_test),
-                            "duration_ms": (datetime.now() - module_start).total_seconds() * 1000,
-                        },
-                        pipeline_id,
-                    )
-
-                    self._set_session_state(pipeline_id, PipelineStage.REFINEMENT.value)
-                    refinement_provider, refinement_model, refinement_api_key = self._resolve_stage_llm("refinement", llm_overrides)
-                    refined_test.modules[idx - 1].source_html = getattr(extracted_test.modules[idx - 1], "source_html", None)
-                    refined_test.modules[idx - 1].extracted_data = extracted_elements
-                    refined_elements = await RefinementStage(self.llm_provider, self.prompt_manager).execute(
-                        crawler,
-                        extracted_test.modules[idx - 1],
-                        refinement_api_key,
-                        refinement_model,
-                        refinement_provider,
-                        headless,
-                        prompt_override=(prompt_overrides or {}).get("refinement"),
-                    )
-                    refined_test.modules[idx - 1].extracted_data = refined_elements
-                    refined_test.modules[idx - 1] = _map_extracted_data_to_steps(refined_test.modules[idx - 1])
-                    self.push_event(
-                        "REFINEMENT_DONE",
-                        "refinement",
-                        {
-                            "index": idx,
-                            "total": len(structured.modules),
-                            "module": module.url,
-                            "elements_count": len(refined_elements),
-                            "elements": _model_dump_list(refined_elements),
-                            "refined_snapshot": _sanitize_module_tree(refined_test),
-                        },
-                        pipeline_id,
-                    )
-
-            self._set_session_state(pipeline_id, PipelineStage.GENERATION.value)
-            self.push_event("STAGE_START", "generation", {"stage": PipelineStage.GENERATION.value}, pipeline_id)
-            generation_provider, generation_model, generation_api_key = self._resolve_stage_llm("generation", llm_overrides)
-            script = await GenerationStage(self.llm_provider, self.prompt_manager).execute(
-                refined_test,
-                framework,
-                language,
-                generation_api_key,
-                generation_model,
-                generation_provider,
-                prompt_override=(prompt_overrides or {}).get("generation"),
-            )
-            self.push_event(
-                "STAGE_DONE",
-                "generation",
-                {"script_length": len(script), "script_preview": script[:500], "script": script},
-                pipeline_id,
-            )
-
-            self._set_session_state(pipeline_id, PipelineStage.VALIDATION.value)
-            self.push_event("STAGE_START", "validation", {"stage": PipelineStage.VALIDATION.value}, pipeline_id)
-            validation_provider, validation_model, validation_api_key = self._resolve_stage_llm("validation", llm_overrides)
-            validation = await ValidationStage(self.llm_provider, self.prompt_manager).execute(
-                script,
-                refined_test,
-                validation_api_key,
-                validation_model,
-                validation_provider,
-                prompt_override=(prompt_overrides or {}).get("validation"),
-            )
-            self.push_event(
-                "STAGE_DONE",
-                "validation",
-                {
-                    "validation": validation,
-                    "detected_inputs": validation.get("detected_inputs", []),
-                    "editable_fields": validation.get("editable_fields", []),
-                    "generated_script": script,
-                },
-                pipeline_id,
-            )
-
-            session["data"].update(
-                {
                     "structured": structured.model_dump(),
                     "extracted": _sanitize_module_tree(extracted_test),
                     "refined": _sanitize_module_tree(refined_test),
                     "script": script,
                     "validation": validation,
-                    "test_case": test_case,
-                    "framework": framework,
-                    "language": language,
-                    "test_name": test_name,
-                    "headless": headless,
-                    "attempt": attempt,
-                    "pipeline_id": pipeline_id,
-                    "prompt_overrides": prompt_overrides or {},
+                    "variables": validation.get("detected_inputs", []),
+                    "editable_fields": validation.get("editable_fields", []),
+                    "logs": self.execution_logs,
                     "llm_overrides": llm_overrides or {},
                 }
-            )
-            session["state"] = "WAITING_VALIDATION"
-            session["paused_at"] = PipelineStage.VALIDATION.value
-            session["updated_at"] = _iso_now()
-            self.push_event(
-                "PIPELINE_PAUSED",
-                "logs",
-                {
-                    "pipeline_id": pipeline_id,
-                    "paused_at": PipelineStage.VALIDATION.value,
-                },
-                pipeline_id,
-            )
-
-            return {
-                "status": "waiting_validation",
-                "pipeline_id": pipeline_id,
-                "structured": structured.model_dump(),
-                "extracted": _sanitize_module_tree(extracted_test),
-                "refined": _sanitize_module_tree(refined_test),
-                "script": script,
-                "validation": validation,
-                "variables": validation.get("detected_inputs", []),
-                "editable_fields": validation.get("editable_fields", []),
-                "logs": self.execution_logs,
-                "llm_overrides": llm_overrides or {},
-            }
-        except Exception as exc:
-            self.push_event("PIPELINE_ERROR", "logs", {"error": str(exc), "traceback": traceback.format_exc()}, pipeline_id)
-            session = self._get_session(pipeline_id)
-            if session:
-                session["state"] = "ERROR"
-                session["data"]["error"] = str(exc)
-                session["paused_at"] = "ERROR"
-            return {"status": "error", "error": str(exc), "pipeline_id": pipeline_id, "logs": self.execution_logs}
+            except Exception as exc:
+                self.push_event("PIPELINE_ERROR", "logs", {"error": str(exc), "traceback": traceback.format_exc()}, pipeline_id)
+                session = self._get_session(pipeline_id)
+                if session:
+                    session["state"] = "ERROR"
+                    session["data"]["error"] = str(exc)
+                    session["paused_at"] = "ERROR"
+                    session["queue"].put(None)
+                return {"status": "error", "error": str(exc), "pipeline_id": pipeline_id, "logs": self.execution_logs}
 
     async def run_full_pipeline_2(
         self,
@@ -1266,216 +1383,231 @@ class GenIAOrchestrator:
         prompt_overrides: Dict[str, str] | None = None,
         llm_overrides: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
-        session = self._get_session(pipeline_id)
-        if not session:
-            self.push_event("PIPELINE_ERROR", "logs", {"error": "Pipeline session not found", "pipeline_id": pipeline_id})
-            raise ValueError("Pipeline session not found")
+        with self._pipeline_lock:
+            session = self._get_session(pipeline_id)
+            if not session:
+                self.push_event("PIPELINE_ERROR", "logs", {"error": "Pipeline session not found", "pipeline_id": pipeline_id})
+                raise ValueError("Pipeline session not found")
 
-        self.push_event("PIPELINE_RESUME", "logs", {"pipeline_id": pipeline_id}, pipeline_id)
-        manual_changes = _normalize_manual_changes(manual_changes)
-        prompt_overrides = prompt_overrides or session["data"].get("prompt_overrides", {}) or {}
-        llm_overrides = llm_overrides or session["data"].get("llm_overrides", {}) or {}
-        refined = session["data"].get("refined")
-        original_script = script_override or session["data"].get("script", "")
-        framework = session["data"].get("framework")
-        language = session["data"].get("language")
-        validation = session["data"].get("validation", {})
+            try:
+                self.push_event("PIPELINE_RESUME", "logs", {"pipeline_id": pipeline_id}, pipeline_id)
+                manual_changes = _normalize_manual_changes(manual_changes)
+                prompt_overrides = prompt_overrides or session["data"].get("prompt_overrides", {}) or {}
+                llm_overrides = llm_overrides or session["data"].get("llm_overrides", {}) or {}
+                refined = session["data"].get("refined")
+                original_script = script_override or session["data"].get("script", "")
+                framework = session["data"].get("framework")
+                language = session["data"].get("language")
+                validation = session["data"].get("validation", {})
 
-        confirmed_script = original_script
-        confirmation_used_llm = False
+                confirmed_script = original_script
+                confirmation_used_llm = False
 
-        if resume_from_stage == "confirmation" and manual_changes and not continue_without_changes:
-            self._set_session_state(pipeline_id, PipelineStage.CONFIRMATION.value)
-            self.push_event("STAGE_START", "confirmation", manual_changes, pipeline_id)
-            confirmation_provider, confirmation_model, confirmation_api_key = self._resolve_stage_llm("confirmation", llm_overrides)
-            confirmed_script = await self.run_confirmation(
-                original_script,
-                manual_changes,
-                prompt_override=prompt_overrides.get("confirmation"),
-                llm_override={"provider": confirmation_provider, "model": confirmation_model, "api_key": confirmation_api_key},
-            )
-            confirmation_used_llm = True
-            self.push_event(
-                "STAGE_DONE",
-                "confirmation",
-                {
-                    "script_updated": True,
+                if resume_from_stage == "confirmation" and manual_changes and not continue_without_changes:
+                    self._set_session_state(pipeline_id, PipelineStage.CONFIRMATION.value)
+                    self.push_event("STAGE_START", "confirmation", manual_changes, pipeline_id)
+                    confirmation_provider, confirmation_model, confirmation_api_key, confirmation_temperature = self._resolve_stage_llm("confirmation", llm_overrides)
+                    confirmed_script = await self.run_confirmation(
+                        original_script,
+                        manual_changes,
+                        temperature=confirmation_temperature,
+                        prompt_override=prompt_overrides.get("confirmation"),
+                        llm_override={"provider": confirmation_provider, "model": confirmation_model, "api_key": confirmation_api_key},
+                    )
+                    confirmation_used_llm = True
+                    self.push_event(
+                        "STAGE_DONE",
+                        "confirmation",
+                        {
+                            "script_updated": True,
+                            "confirmed_script": confirmed_script,
+                            "script_preview": confirmed_script[:500],
+                        },
+                        pipeline_id,
+                    )
+                else:
+                    self.push_event(
+                        "STAGE_DONE",
+                        "confirmation",
+                        {
+                            "script_updated": False,
+                            "script_reused": True,
+                            "confirmed_script": confirmed_script,
+                            "script_preview": confirmed_script[:500],
+                        },
+                        pipeline_id,
+                    )
+
+                session["data"]["manual_changes"] = manual_changes
+                session["data"]["confirmed_script"] = confirmed_script
+                session["data"]["confirmation_used_llm"] = confirmation_used_llm
+
+                self._set_session_state(pipeline_id, PipelineStage.EXECUTION.value)
+                self.push_event("STAGE_START", "execution", {"framework": framework, "language": language}, pipeline_id)
+                execution_result = await self.run_execution(
+                    confirmed_script,
+                    framework,
+                    language,
+                    log_callback=lambda level, message: self.push_event(
+                        "EXECUTION_LOG",
+                        "execution",
+                        {"level": level, "message": message},
+                        pipeline_id,
+                    ),
+                )
+                self.push_event("STAGE_DONE", "execution", _model_dump(execution_result), pipeline_id)
+
+                self._set_session_state(pipeline_id, PipelineStage.HOMOLOGATION.value)
+                self.push_event("STAGE_START", "homologation", {}, pipeline_id)
+                homologation_provider, homologation_model, homologation_api_key, homologation_temperature = self._resolve_stage_llm("homologation", llm_overrides)
+                homologation = await self.run_homologation(
+                    execution_result,
+                    refined,
+                    validation,
+                    manual_changes,
+                    confirmed_script,
+                    temperature=homologation_temperature,
+                    prompt_override=prompt_overrides.get("homologation"),
+                    llm_override={"provider": homologation_provider, "model": homologation_model, "api_key": homologation_api_key},
+                )
+                self.push_event("STAGE_DONE", "homologation", homologation, pipeline_id)
+
+                execution_artifacts = _compact_execution_artifacts(execution_result)
+                finalization_input = {
+                    "pipeline_id": pipeline_id,
+                    "inputs": {
+                        "initial_input": session["data"].get("initial_input"),
+                        "test_case": session["data"].get("test_case"),
+                        "framework": framework,
+                        "language": language,
+                        "test_name": session["data"].get("test_name"),
+                        "manual_changes": manual_changes,
+                        "validation": {
+                            "detected_inputs": _compact_sequence(validation.get("detected_inputs", []), 15),
+                            "editable_fields": _compact_sequence(validation.get("editable_fields", []), 15),
+                        },
+                    },
+                    "history": _compact_history_entries(session["history"], 25),
+                    "timeline": _compact_timeline_entries(session["timeline"], 30),
+                    "structured": _sanitize_module_tree(session["data"].get("structured") or {}),
+                    "extracted": _sanitize_module_tree(session["data"].get("extracted") or {}),
+                    "refined": _sanitize_module_tree(refined or {}),
+                    "script": {
+                        "original": _truncate_text(original_script, 5000),
+                        "confirmed": _truncate_text(confirmed_script, 5000),
+                    },
+                    "execution": _compact_execution_result(execution_result),
+                    "execution_artifacts": execution_artifacts,
+                    "homologation": {
+                        key: _truncate_text(value, 2500)
+                        for key, value in (homologation or {}).items()
+                    }
+                    if isinstance(homologation, dict)
+                    else _truncate_text(str(homologation), 2500),
+                    "logs": _compact_log_entries(self.execution_logs, 80, 300),
+                    "prompts_used": [
+                        "structuring",
+                        "extraction",
+                        "refinement",
+                        "generation",
+                        "validation",
+                        "confirmation",
+                        "execution",
+                        "homologation",
+                        "finalization",
+                        "refactoring",
+                    ],
+                }
+
+                self._set_session_state(pipeline_id, PipelineStage.FINALIZATION.value)
+                self.push_event("STAGE_START", "finalization", {}, pipeline_id)
+                finalization_provider, finalization_model, finalization_api_key, finalization_temperature = self._resolve_stage_llm("finalization", llm_overrides)
+                final_report = await self.run_finalization(
+                    finalization_input,
+                    temperature=finalization_temperature,
+                    prompt_override=prompt_overrides.get("finalization"),
+                    llm_override={"provider": finalization_provider, "model": finalization_model, "api_key": finalization_api_key},
+                )
+                self.push_event("STAGE_DONE", "finalization", final_report, pipeline_id)
+
+                self._set_session_state(pipeline_id, PipelineStage.REFACTORING.value)
+                self.push_event("STAGE_START", "refactoring", {}, pipeline_id)
+                refactoring_provider, refactoring_model, refactoring_api_key, refactoring_temperature = self._resolve_stage_llm("refactoring", llm_overrides)
+                refactoring = await self.run_refactoring(
+                    confirmed_script,
+                    execution_result,
+                    homologation,
+                    final_report,
+                    temperature=refactoring_temperature,
+                    prompt_override=prompt_overrides.get("refactoring"),
+                    llm_override={"provider": refactoring_provider, "model": refactoring_model, "api_key": refactoring_api_key},
+                )
+
+                if not isinstance(refactoring, dict):
+                    refactoring = {"refactored_script": str(refactoring)}
+
+                refactored_script = refactoring.get("refactored_script") or refactoring.get("script") or ""
+                if not refactored_script:
+                    refactored_script = confirmed_script
+
+                refactoring.setdefault("original_script", original_script)
+                refactoring.setdefault("refactored_script", refactored_script)
+                refactoring.setdefault("diff", "")
+                refactoring.setdefault("justification", "")
+
+                self.push_event("STAGE_DONE", "refactoring", refactoring, pipeline_id)
+
+                exportables = {
+                    "json": final_report,
+                    "html": _build_execution_report_html(final_report),
+                    "markdown": _build_execution_report_markdown(final_report),
+                }
+
+                session["data"].update(
+                    {
+                        "manual_changes": manual_changes,
+                        "confirmed_script": confirmed_script,
+                        "execution_result": _model_dump(execution_result),
+                        "homologation": homologation,
+                        "final_report": final_report,
+                        "refactoring": refactoring,
+                        "refactored_script": refactored_script,
+                        "exportables": exportables,
+                        "state": "COMPLETED",
+                        "prompt_overrides": prompt_overrides,
+                        "llm_overrides": llm_overrides,
+                    }
+                )
+                session["state"] = "COMPLETED"
+                session["updated_at"] = _iso_now()
+                self.push_event("PIPELINE_COMPLETED", "logs", {"pipeline_id": pipeline_id}, pipeline_id)
+                session["queue"].put(None)
+
+                return {
+                    "status": "completed",
+                    "pipeline_id": pipeline_id,
+                    "execution": _model_dump(execution_result),
+                    "homologation": homologation,
+                    "final_report": final_report,
+                    "exportables": exportables,
+                    "refactoring": refactoring,
+                    "refactored_script": refactored_script,
                     "confirmed_script": confirmed_script,
-                    "script_preview": confirmed_script[:500],
-                },
-                pipeline_id,
-            )
-        else:
-            self.push_event(
-                "STAGE_DONE",
-                "confirmation",
-                {
-                    "script_updated": False,
-                    "script_reused": True,
-                    "confirmed_script": confirmed_script,
-                    "script_preview": confirmed_script[:500],
-                },
-                pipeline_id,
-            )
-
-        session["data"]["manual_changes"] = manual_changes
-        session["data"]["confirmed_script"] = confirmed_script
-        session["data"]["confirmation_used_llm"] = confirmation_used_llm
-
-        self._set_session_state(pipeline_id, PipelineStage.EXECUTION.value)
-        self.push_event("STAGE_START", "execution", {"framework": framework, "language": language}, pipeline_id)
-        execution_result = await self.run_execution(
-            confirmed_script,
-            framework,
-            language,
-            log_callback=lambda level, message: self.push_event(
-                "EXECUTION_LOG",
-                "execution",
-                {"level": level, "message": message},
-                pipeline_id,
-            ),
-        )
-        self.push_event("STAGE_DONE", "execution", _model_dump(execution_result), pipeline_id)
-
-        self._set_session_state(pipeline_id, PipelineStage.HOMOLOGATION.value)
-        self.push_event("STAGE_START", "homologation", {}, pipeline_id)
-        homologation_provider, homologation_model, homologation_api_key = self._resolve_stage_llm("homologation", llm_overrides)
-        homologation = await self.run_homologation(
-            execution_result,
-            refined,
-            validation,
-            manual_changes,
-            confirmed_script,
-            prompt_override=prompt_overrides.get("homologation"),
-            llm_override={"provider": homologation_provider, "model": homologation_model, "api_key": homologation_api_key},
-        )
-        self.push_event("STAGE_DONE", "homologation", homologation, pipeline_id)
-
-        execution_artifacts = _compact_execution_artifacts(execution_result)
-        finalization_input = {
-            "pipeline_id": pipeline_id,
-            "inputs": {
-                "initial_input": session["data"].get("initial_input"),
-                "test_case": session["data"].get("test_case"),
-                "framework": framework,
-                "language": language,
-                "test_name": session["data"].get("test_name"),
-                "manual_changes": manual_changes,
-                "validation": {
-                    "detected_inputs": _compact_sequence(validation.get("detected_inputs", []), 15),
-                    "editable_fields": _compact_sequence(validation.get("editable_fields", []), 15),
-                },
-            },
-            "history": _compact_history_entries(session["history"], 25),
-            "timeline": _compact_timeline_entries(session["timeline"], 30),
-            "structured": _sanitize_module_tree(session["data"].get("structured") or {}),
-            "extracted": _sanitize_module_tree(session["data"].get("extracted") or {}),
-            "refined": _sanitize_module_tree(refined or {}),
-            "script": {
-                "original": _truncate_text(original_script, 5000),
-                "confirmed": _truncate_text(confirmed_script, 5000),
-            },
-            "execution": _compact_execution_result(execution_result),
-            "execution_artifacts": execution_artifacts,
-            "homologation": {
-                key: _truncate_text(value, 2500)
-                for key, value in (homologation or {}).items()
-            }
-            if isinstance(homologation, dict)
-            else _truncate_text(str(homologation), 2500),
-            "logs": _compact_log_entries(self.execution_logs, 80, 300),
-            "prompts_used": [
-                "structuring",
-                "extraction",
-                "refinement",
-                "generation",
-                "validation",
-                "confirmation",
-                "execution",
-                "homologation",
-                "finalization",
-                "refactoring",
-            ],
-        }
-
-        self._set_session_state(pipeline_id, PipelineStage.FINALIZATION.value)
-        self.push_event("STAGE_START", "finalization", {}, pipeline_id)
-        finalization_provider, finalization_model, finalization_api_key = self._resolve_stage_llm("finalization", llm_overrides)
-        final_report = await self.run_finalization(
-            finalization_input,
-            prompt_override=prompt_overrides.get("finalization"),
-            llm_override={"provider": finalization_provider, "model": finalization_model, "api_key": finalization_api_key},
-        )
-        self.push_event("STAGE_DONE", "finalization", final_report, pipeline_id)
-
-        self._set_session_state(pipeline_id, PipelineStage.REFACTORING.value)
-        self.push_event("STAGE_START", "refactoring", {}, pipeline_id)
-        refactoring_provider, refactoring_model, refactoring_api_key = self._resolve_stage_llm("refactoring", llm_overrides)
-        refactoring = await self.run_refactoring(
-            confirmed_script,
-            execution_result,
-            homologation,
-            final_report,
-            prompt_override=prompt_overrides.get("refactoring"),
-            llm_override={"provider": refactoring_provider, "model": refactoring_model, "api_key": refactoring_api_key},
-        )
-
-        if not isinstance(refactoring, dict):
-            refactoring = {"refactored_script": str(refactoring)}
-
-        refactored_script = refactoring.get("refactored_script") or refactoring.get("script") or ""
-        if not refactored_script:
-            refactored_script = confirmed_script
-
-        refactoring.setdefault("original_script", original_script)
-        refactoring.setdefault("refactored_script", refactored_script)
-        refactoring.setdefault("diff", "")
-        refactoring.setdefault("justification", "")
-
-        self.push_event("STAGE_DONE", "refactoring", refactoring, pipeline_id)
-
-        exportables = {
-            "json": final_report,
-            "html": _build_execution_report_html(final_report),
-            "markdown": _build_execution_report_markdown(final_report),
-        }
-
-        session["data"].update(
-            {
-                "manual_changes": manual_changes,
-                "confirmed_script": confirmed_script,
-                "execution_result": _model_dump(execution_result),
-                "homologation": homologation,
-                "final_report": final_report,
-                "refactoring": refactoring,
-                "refactored_script": refactored_script,
-                "exportables": exportables,
-                "state": "COMPLETED",
-                "prompt_overrides": prompt_overrides,
-                "llm_overrides": llm_overrides,
-            }
-        )
-        session["state"] = "COMPLETED"
-        session["updated_at"] = _iso_now()
-        self.push_event("PIPELINE_COMPLETED", "logs", {"pipeline_id": pipeline_id}, pipeline_id)
-        session["queue"].put(None)
-
-        return {
-            "status": "completed",
-            "pipeline_id": pipeline_id,
-            "execution": _model_dump(execution_result),
-            "homologation": homologation,
-            "final_report": final_report,
-            "exportables": exportables,
-            "refactoring": refactoring,
-            "refactored_script": refactored_script,
-            "confirmed_script": confirmed_script,
-            "manual_changes": manual_changes,
-            "confirmation_used_llm": confirmation_used_llm,
-            "resume_from_stage": resume_from_stage or "confirmation",
-            "logs": self.execution_logs,
-            "llm_overrides": llm_overrides,
-        }
+                    "manual_changes": manual_changes,
+                    "confirmation_used_llm": confirmation_used_llm,
+                    "resume_from_stage": resume_from_stage or "confirmation",
+                    "logs": self.execution_logs,
+                    "llm_overrides": llm_overrides,
+                }
+            except Exception as exc:
+                self.push_event("PIPELINE_ERROR", "logs", {"error": str(exc), "traceback": traceback.format_exc()}, pipeline_id)
+                session = self._get_session(pipeline_id)
+                if session:
+                    session["state"] = "ERROR"
+                    session["data"]["error"] = str(exc)
+                    session["paused_at"] = "ERROR"
+                    session["queue"].put(None)
+                return {"status": "error", "error": str(exc), "pipeline_id": pipeline_id, "logs": self.execution_logs}
 
 
 async def validate_llm_connection(provider: str, model: str, api_key: str) -> bool:
