@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import tempfile
 from queue import Empty
 import traceback
@@ -45,6 +46,15 @@ def trace(message: str) -> None:
 
 def model_to_dict(value: Any) -> Any:
     return value.model_dump() if hasattr(value, "model_dump") else value
+
+
+def _load_allowed_origins() -> list[str]:
+    raw = os.getenv(
+        "FRONTEND_ORIGINS",
+        "http://localhost:5500,https://genia-e2etest-platform.onrender.com,https://genia-e2etest-ai-driven-platform.onrender.com",
+    )
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or ["*"]
 
 
 def validate_request_json(*required_fields):
@@ -120,7 +130,8 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = settings.max_upload_size_mb * 1024 * 1024
 
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    allowed_origins = _load_allowed_origins()
+    CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
     socketio = SocketIO(app, cors_allowed_origins="*")
     limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["200 per day", "50 per hour"], storage_uri="memory://")
     orchestrator = GenIAOrchestrator(prompts_dir=settings.prompts_dir)
@@ -134,7 +145,12 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     def apply_headers(response):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Access-Control-Allow-Origin"] = "*"
+        request_origin = request.headers.get("Origin")
+        if request_origin and request_origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = request_origin
+            response.headers["Vary"] = "Origin"
+        elif "*" in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         request_id = getattr(request, "request_id", "--------")
