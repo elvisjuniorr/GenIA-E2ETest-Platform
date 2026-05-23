@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import tempfile
 from queue import Empty
 import traceback
@@ -55,6 +56,18 @@ def _load_allowed_origins() -> list[str]:
     )
     origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
     return origins or ["*"]
+
+
+def _is_allowed_origin(origin: str | None) -> bool:
+    if not origin:
+        return False
+    if origin.startswith("http://localhost:") or origin.startswith("http://127.0.0.1:"):
+        return True
+    if origin == "https://genia-e2etest-platform.onrender.com":
+        return True
+    if origin == "https://genia-e2etest-ai-driven-platform.onrender.com":
+        return True
+    return bool(re.match(r"^https://[a-z0-9-]+(?:\.[a-z0-9-]+)*\.onrender\.com$", origin))
 
 
 def validate_request_json(*required_fields):
@@ -131,7 +144,8 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     app.config["MAX_CONTENT_LENGTH"] = settings.max_upload_size_mb * 1024 * 1024
 
     allowed_origins = _load_allowed_origins()
-    CORS(app, resources={r"/api/*": {"origins": allowed_origins}})
+    cors_origins = allowed_origins if allowed_origins != ["*"] else [re.compile(r"^https://[a-z0-9-]+(?:\.[a-z0-9-]+)*\.onrender\.com$"), re.compile(r"^http://localhost:\d+$"), re.compile(r"^http://127\.0\.0\.1:\d+$")]
+    CORS(app, resources={r"/api/*": {"origins": cors_origins}})
     socketio = SocketIO(app, cors_allowed_origins="*")
     limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["200 per day", "50 per hour"], storage_uri="memory://")
     orchestrator = GenIAOrchestrator(prompts_dir=settings.prompts_dir)
@@ -146,7 +160,7 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         request_origin = request.headers.get("Origin")
-        if request_origin and request_origin in allowed_origins:
+        if _is_allowed_origin(request_origin):
             response.headers["Access-Control-Allow-Origin"] = request_origin
             response.headers["Vary"] = "Origin"
         elif "*" in allowed_origins:
