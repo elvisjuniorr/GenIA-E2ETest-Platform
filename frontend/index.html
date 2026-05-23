@@ -270,9 +270,24 @@
                 <label for="freeTextInput">Caso de teste</label>
                 <textarea id="freeTextInput" rows="7" placeholder="Descreva o caso de teste com as URLs de cada página."></textarea>
               </div>
-              <div id="gherkinGroup" class="form-group hidden">
-                <label for="gherkinInput">História de usuário (Gherkin)</label>
-                <textarea id="gherkinInput" rows="7" placeholder="Feature: ...&#10;Scenario: ..."></textarea>
+              <div id="gherkinGroup" class="gherkin-panel hidden">
+                <div class="gherkin-panel-head">
+                  <div>
+                    <label for="gherkinInput">História de usuário (Gherkin)</label>
+                    <p class="helper-text">Anexe um arquivo `.feature` ou `.txt`:</p>
+                  </div>
+                  <div class="gherkin-file-wrap">
+                    <label for="gherkinFileInput" class="btn-secondary btn-file">Anexar arquivo</label>
+                    <input type="file" id="gherkinFileInput" accept=".feature,.txt,text/plain,.feature,text/plain" hidden />
+                    <span class="gherkin-file-name" id="gherkinFileName">Nenhum arquivo selecionado</span>
+                  </div>
+                </div>
+                <textarea id="gherkinInput" rows="8" placeholder="Feature: ...&#10;Scenario: ..."></textarea>
+                <div class="form-group">
+                  <label for="gherkinUrlsInput">URLs manuais da história de usuário</label>
+                  <textarea id="gherkinUrlsInput" rows="3" placeholder="https://site.com/login&#10;https://site.com/signup"></textarea>
+                  <p class="helper-text">As URLs serão combinadas com as encontradas no texto para alimentar a etapa de estruturação.</p>
+                </div>
               </div>
             </div>
 

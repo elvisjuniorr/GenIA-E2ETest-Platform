@@ -9,6 +9,7 @@ import tempfile
 import time
 import traceback
 import uuid
+from textwrap import dedent
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -139,6 +140,29 @@ class TestExecutor:
             return "GeneratedTest.java"
         return f"test_{uuid.uuid4().hex}.py"
 
+    def _write_robot_listener(self, directory: str) -> str:
+        listener_source = dedent(
+            """
+            ROBOT_LISTENER_API_VERSION = 3
+
+            def end_test(data, result):
+                if getattr(result, "status", "") != "FAIL":
+                    return
+                try:
+                    from robot.libraries.BuiltIn import BuiltIn
+                    built_in = BuiltIn()
+                    try:
+                        built_in.run_keyword("Capture Page Screenshot")
+                    except Exception:
+                        built_in.run_keyword("Capture Screenshot")
+                except Exception:
+                    pass
+            """
+        ).strip()
+        listener_path = os.path.join(directory, "genia_failure_listener.py")
+        Path(listener_path).write_text(listener_source, encoding="utf-8")
+        return listener_path
+
     def execute(
         self,
         framework: str,
@@ -161,6 +185,10 @@ class TestExecutor:
             if framework.lower() == "junit" and command[:1] == ["mvn"]:
                 execution_log_lines.append("[EXECUTION] Maven detected, but no project scaffold was generated")
                 raise RuntimeError("JUnit execution requires a Maven or Gradle project scaffold.")
+
+            if framework.lower() == "robotframework":
+                listener_path = self._write_robot_listener(temp_dir)
+                command = ["robot", "--listener", listener_path, file_path]
 
             execution_log_lines.append(f"[EXECUTION] Command: {' '.join(command)}")
             self._emit(log_callback, "info", f"Executando {' '.join(command)}")

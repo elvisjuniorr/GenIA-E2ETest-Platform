@@ -116,6 +116,7 @@ label {
 .auth-panel,
 .app-panel {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .auth-panel {
@@ -260,6 +261,15 @@ label {
   opacity: 0.92;
 }
 
+.btn-file {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
 .btn-primary-inline {
   width: auto;
 }
@@ -365,6 +375,7 @@ label {
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .nav-section {
@@ -490,6 +501,7 @@ label {
   height: 100%;
   overflow: auto;
   padding-right: 6px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .screen.active {
@@ -665,6 +677,60 @@ label {
   margin: -6px 0 14px;
   color: var(--text-secondary);
   font-size: 0.92rem;
+}
+
+.gherkin-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 246, 241, 0.96));
+  box-shadow: var(--shadow-sm);
+}
+
+.gherkin-panel-head {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  flex-direction: column;
+}
+
+.gherkin-panel-head label {
+  margin-bottom: 4px;
+}
+
+.gherkin-file-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  min-width: 5rem;
+}
+
+.gherkin-file-wrap > label{
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.gherkin-file-wrap > label:hover{
+  background: var(--text-secondary);
+}
+
+.gherkin-file-name {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  word-break: break-word;
+}
+    
+
+#gherkinInput,
+#gherkinUrlsInput {
+  font-family: var(--font-mono);
+  line-height: 1.55;
 }
 
 .radio-group {
@@ -881,6 +947,30 @@ label {
   color: #fff;
   font-weight: 800;
   letter-spacing: 0.04em;
+}
+
+.screenshot-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.screenshot-hero img {
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  display: block;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+.screenshot-hero span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  word-break: break-word;
 }
 
 .generation-results {
@@ -2091,6 +2181,7 @@ label {
 }
 
 @media (max-width: 1145px) {
+
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2116,8 +2207,41 @@ label {
 }
 
 @media (max-width: 900px) {
+
+  .brand-text{
+    font-size: 2rem;
+  }
+
+  .sidebar-nav {
+      display: flex;
+      flex-direction: row; /* muda para horizontal */
+      gap: 8px;
+      justify-content: space-around;
+
+      overflow-x: auto;
+      overflow-y: hidden;
+
+      -webkit-overflow-scrolling: touch;
+
+      white-space: nowrap;
+  }
+
   .app-panel {
     flex-direction: column;
+  }
+
+  .auth-panel {
+    align-items: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 16px 12px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .auth-container {
+    width: min(560px, 100%);
+    max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .sidebar-brand {
@@ -2129,10 +2253,26 @@ label {
     width: 100%;
     min-width: 0;
     height: auto;
-    max-height: 36vh;
+    max-height: 42vh;
     overflow-y: auto;
     z-index: 4;
     box-shadow: var(--shadow-sm);
+    padding: 12px 12px 10px;
+  }
+
+  .sidebar-brand {
+    gap: 10px;
+  }
+
+  .sidebar-brand .brand-mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+  }
+
+  .geniaLogoPanel {
+    height: 1.8rem;
   }
 
   .prompt-stage-select {
@@ -2141,7 +2281,8 @@ label {
   }
 
   .main-content {
-    padding: 18px 14px 24px;
+    padding: 18px 14px calc(112px + env(safe-area-inset-bottom));
+    height: calc(100dvh - 0px);
   }
 
   .stats-grid {
@@ -2172,6 +2313,48 @@ label {
   .dual-result-layout {
     grid-template-columns: 1fr;
   }
+
+  .sidebar-brand,
+  .sidebar-user .label {
+    font-size: 0.68rem;
+  }
+
+  .sidebar-user {
+    padding: 8px 10px;
+    margin-bottom: 10px;
+  }
+
+  .sidebar-user .email {
+    font-size: 0.8rem;
+  }
+
+  .nav-item {
+    min-height: 38px;
+    padding: 0 10px;
+    font-size: 0.9rem;
+  }
+
+  .nav-sub-item {
+    min-height: 32px;
+    font-size: 0.8rem;
+    padding-left: 28px;
+  }
+
+  .sidebar-footer {
+    padding-top: 10px;
+  }
+
+  .btn-logout {
+    min-height: 38px;
+    font-size: 0.85rem;
+  }
+
+  .btn-generate {
+    position: sticky;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    z-index: 2;
+    margin-top: 12px;
+  }
 }
 
 @media (max-width: 640px) {
@@ -2199,5 +2382,9 @@ label {
 
   .results-tabs {
     padding-bottom: 6px;
+  }
+
+  .screen {
+    padding-right: 0;
   }
 }

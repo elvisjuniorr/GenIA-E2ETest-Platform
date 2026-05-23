@@ -73,13 +73,13 @@
       error: "✕",
     };
 
-    const loadPromptBundle = async (framework) => {
+    const loadPromptBundle = async (framework, inputMode = null) => {
       const currentToken = ++promptLoadToken;
       try {
-        const response = await root.api.geniaAPI.getPromptBundle(framework);
+        const response = await root.api.geniaAPI.getPromptBundle(framework, inputMode);
         if (currentToken !== promptLoadToken) return;
         promptBundle = response?.prompts || {};
-        promptBundleFramework = framework || "";
+        promptBundleFramework = `${framework || ""}:${inputMode || "test_case"}`;
         buildPromptsAccordion();
         refreshLLMSelectorInGenerator();
       } catch (error) {
@@ -502,8 +502,10 @@
         });
 
         language.disabled = !languages.length;
-        if (framework.value && framework.value !== promptBundleFramework) {
-          loadPromptBundle(framework.value);
+        const currentInputMode = getPipelineInputMode();
+        const expectedBundleKey = `${framework.value || ""}:${currentInputMode}`;
+        if (framework.value && expectedBundleKey !== promptBundleFramework) {
+          loadPromptBundle(framework.value, currentInputMode);
         }
       };
 
@@ -549,11 +551,58 @@
       const type = qsa('input[name="inputType"]:checked')[0]?.value || "testcase";
       byId("testCaseGroup")?.classList.toggle("hidden", type === "gherkin");
       byId("gherkinGroup")?.classList.toggle("hidden", type !== "gherkin");
+      if (type !== "gherkin") {
+        setGherkinFileName("");
+      }
+      const framework = byId("testFramework")?.value || "";
+      if (framework) {
+        loadPromptBundle(framework, type === "gherkin" ? "user_story" : "test_case");
+      }
     };
+
+    const setGherkinFileName = (name = "") => {
+      const label = byId("gherkinFileName");
+      if (label) {
+        label.textContent = name ? `Arquivo: ${name}` : "Nenhum arquivo selecionado";
+      }
+    };
+
+    const getPipelineInputMode = () => (qsa('input[name="inputType"]:checked')[0]?.value === "gherkin" ? "user_story" : "test_case");
+
+    const readTextFile = (file) => new Promise((resolve, reject) => {
+      if (!file) {
+        resolve("");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("Falha ao ler arquivo"));
+      reader.readAsText(file);
+    });
+
+    const collectManualStoryUrls = () => extractUrlsFromText(normalizeText(byId("gherkinUrlsInput")?.value));
 
     const setupInputModeToggles = () => {
       qsa('input[name="inputMode"]').forEach((radio) => radio.addEventListener("change", syncEntryModeUI));
       qsa('input[name="inputType"]').forEach((radio) => radio.addEventListener("change", syncInputTypeUI));
+      byId("gherkinFileInput")?.addEventListener("change", async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) {
+          setGherkinFileName("");
+          return;
+        }
+
+        try {
+          const content = await readTextFile(file);
+          const input = byId("gherkinInput");
+          if (input) input.value = content;
+          setGherkinFileName(file.name);
+        } catch (error) {
+          console.error(error);
+          showToast(error?.message || "Não foi possível ler o arquivo", "error");
+          setGherkinFileName("");
+        }
+      });
       syncEntryModeUI();
       syncInputTypeUI();
     };
@@ -1557,6 +1606,34 @@
       `;
     };
 
+    const getImageArtifactPaths = (...groups) =>
+      groups
+        .flat()
+        .filter((item) => typeof item === "string" && /\.(png|jpe?g|webp|gif)$/i.test(item));
+
+    const renderScreenshotGallery = (paths = [], container, title = "Screenshots") => {
+      const list = Array.isArray(paths) ? paths.filter((path) => typeof path === "string" && path.trim()) : [];
+      if (!list.length || !container) return false;
+
+      const block = document.createElement("div");
+      block.className = "report-block";
+      block.innerHTML = `<h4>${escapeHtml(title)}</h4><div class="screenshot-grid"></div>`;
+      const grid = block.querySelector(".screenshot-grid");
+
+      list.forEach((path) => {
+        const figure = document.createElement("a");
+        figure.className = "screenshot-card";
+        figure.href = artifactUrl(path);
+        figure.target = "_blank";
+        figure.rel = "noreferrer";
+        figure.innerHTML = `<img src="${artifactUrl(path)}" alt="screenshot" loading="lazy" /><span>${escapeHtml(path.split(/[\\/]/).pop())}</span>`;
+        grid?.appendChild(figure);
+      });
+
+      container.appendChild(block);
+      return true;
+    };
+
     const renderReportSection = (containerId, title, value, extraRenderer = null) => {
       const container = byId(containerId);
       if (!container) return;
@@ -1605,6 +1682,14 @@
 
     const renderExecutionReport = (execution) => {
       renderReportSection("executionContent", "Execução", execution, (value, container) => {
+        const imageArtifacts = getImageArtifactPaths(
+          value?.screenshots || [],
+          value?.image_evidence || [],
+          value?.evidence || [],
+          value?.test_results?.screenshots || []
+        );
+        const primaryScreenshot = value?.primary_screenshot || imageArtifacts[0] || "";
+
         if (value.stdout) {
           const stdout = document.createElement("div");
           stdout.className = "report-block";
@@ -1633,26 +1718,26 @@
           container.appendChild(logs);
         }
 
-        if (value.screenshots?.length) {
-          const wrap = document.createElement("div");
-          wrap.className = "report-block";
-          wrap.innerHTML = `<h4>Screenshots</h4><div class="screenshot-grid"></div>`;
-          const grid = wrap.querySelector(".screenshot-grid");
-          value.screenshots.forEach((path) => {
-            const figure = document.createElement("a");
-            figure.className = "screenshot-card";
-            figure.href = artifactUrl(path);
-            figure.target = "_blank";
-            figure.rel = "noreferrer";
-            figure.innerHTML = `<img src="${artifactUrl(path)}" alt="screenshot" loading="lazy" /><span>${escapeHtml(path.split(/[\\/]/).pop())}</span>`;
-            grid?.appendChild(figure);
-          });
-          container.appendChild(wrap);
+        if (primaryScreenshot) {
+          const hero = document.createElement("div");
+          hero.className = "report-block";
+          hero.innerHTML = `
+            <h4>Screenshot de falha</h4>
+            <a class="screenshot-hero" href="${artifactUrl(primaryScreenshot)}" target="_blank" rel="noreferrer">
+              <img src="${artifactUrl(primaryScreenshot)}" alt="screenshot de falha" loading="lazy" />
+              <span>${escapeHtml(primaryScreenshot.split(/[\\/]/).pop())}</span>
+            </a>
+          `;
+          container.appendChild(hero);
+        }
+
+        if (imageArtifacts.length) {
+          renderScreenshotGallery(imageArtifacts, container, "Screenshots");
         }
 
         if (value.evidence?.length) {
           renderArtifacts(value.evidence, "executionArtifacts", "Evidências");
-        } else {
+        } else if (!imageArtifacts.length) {
           renderArtifacts(value.screenshots || [], "executionArtifacts", "Screenshots");
         }
 
@@ -1672,6 +1757,14 @@
         banner.classList.remove("hidden");
       }
       renderReportSection("homologationContent", "Homologação", homologation, (value, container) => {
+        const imageArtifacts = getImageArtifactPaths(
+          value?.execution_artifacts?.screenshots || [],
+          value?.execution_artifacts?.image_evidence || [],
+          value?.screenshots || [],
+          value?.image_evidence || [],
+          value?.evidence || []
+        );
+
         const summaryGrid = document.createElement("div");
         summaryGrid.className = "report-summary-grid";
         const summaryFields = [
@@ -1691,22 +1784,8 @@
           container.appendChild(summaryGrid);
         }
 
-        const screenshots = value?.screenshots || value?.evidence?.screenshots || value?.artifacts || [];
-        if (screenshots.length) {
-          const block = document.createElement("div");
-          block.className = "report-block";
-          block.innerHTML = `<h4>Screenshots</h4><div class="screenshot-grid"></div>`;
-          const grid = block.querySelector(".screenshot-grid");
-          screenshots.forEach((path) => {
-            const link = document.createElement("a");
-            link.className = "screenshot-card";
-            link.href = artifactUrl(path);
-            link.target = "_blank";
-            link.rel = "noreferrer";
-            link.innerHTML = `<img src="${artifactUrl(path)}" alt="screenshot" loading="lazy" /><span>${escapeHtml(path.split(/[\\/]/).pop())}</span>`;
-            grid?.appendChild(link);
-          });
-          container.appendChild(block);
+        if (imageArtifacts.length) {
+          renderScreenshotGallery(imageArtifacts, container, "Screenshots");
         }
       });
     };
@@ -2149,6 +2228,7 @@
 
     const validateAndGenerateTest = async () => {
       try {
+        root.api?.geniaAPI?.closePipelineLogStream?.();
         const configs = authService.getLLMConfigs();
         const selectedId = getGlobalLLMConfigId();
         const llmConfig = configs.find((config) => config.id === selectedId);
@@ -2171,18 +2251,38 @@
 
         let testDescription = "";
         let urls = [];
+        let backendInputMode = "test_case";
+        let userStoryContent = "";
+        let userStoryFilename = "";
+        let manualUrls = [];
 
         if (inputMode === INPUT_MODES.FREE) {
           const inputType = qsa('input[name="inputType"]:checked')[0]?.value || "testcase";
-          testDescription = inputType === "gherkin" ? normalizeText(byId("gherkinInput")?.value) : normalizeText(byId("freeTextInput")?.value);
-          if (!testDescription) {
-            showToast("Informe o caso de teste", "error");
-            return;
+          if (inputType === "gherkin") {
+            const textareaStory = normalizeText(byId("gherkinInput")?.value);
+            const storyFile = byId("gherkinFileInput")?.files?.[0] || null;
+            const fileStory = storyFile ? await readTextFile(storyFile) : "";
+            userStoryContent = textareaStory || fileStory;
+            userStoryFilename = storyFile?.name || "";
+            manualUrls = collectManualStoryUrls();
+            testDescription = userStoryContent;
+            backendInputMode = "user_story";
+            urls = Array.from(new Set([
+              ...extractUrlsFromText(userStoryContent),
+              ...manualUrls,
+            ]));
+          } else {
+            testDescription = normalizeText(byId("freeTextInput")?.value);
+            if (!testDescription) {
+              showToast("Informe o caso de teste", "error");
+              return;
+            }
+            urls = extractUrlsFromText(testDescription);
           }
-          urls = extractUrlsFromText(testDescription);
         } else {
           const payload = buildStructuredPayload();
           testDescription = payload.testCase;
+          backendInputMode = "test_case";
           urls = payload.modules.map((module) => module.url).filter(Boolean);
           if (!testDescription) {
             showToast("Informe o título estruturado", "error");
@@ -2195,7 +2295,7 @@
           return;
         }
 
-        await loadPromptBundle(framework);
+        await loadPromptBundle(framework, backendInputMode);
 
         const pipelineOverrides = collectPipelineOverrides();
 
@@ -2204,9 +2304,13 @@
           framework,
           language,
           inputMode,
+          backendInputMode,
           project,
           testDescription,
           urls,
+          userStoryContent,
+          userStoryFilename,
+          manualUrls,
           llmConfig,
           promptOverrides: pipelineOverrides.promptOverrides,
           llmOverrides: pipelineOverrides.llmOverrides,
@@ -2301,7 +2405,7 @@
           project: currentSession.project,
           provider: currentSession.llmConfig.provider,
           model: currentSession.llmConfig.model,
-          inputMode: currentSession.inputMode,
+          inputMode: currentSession.backendInputMode || currentSession.inputMode,
           prompt: Object.keys(currentSession.promptOverrides || {}).length ? JSON.stringify(currentSession.promptOverrides || {}) : "",
           urls: currentSession.urls,
           results: currentSession.results,
