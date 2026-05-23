@@ -9,6 +9,7 @@ import tempfile
 import time
 import traceback
 import uuid
+import sys
 from textwrap import dedent
 from pathlib import Path
 from typing import Callable, Optional
@@ -20,6 +21,12 @@ LogCallback = Callable[[str, str], None]
 
 
 class TestExecutor:
+    def _python_command(self) -> str:
+        return sys.executable or "python"
+
+    def _is_unix_like(self) -> bool:
+        return os.name != "nt"
+
     def _emit(self, callback: Optional[LogCallback], level: str, message: str) -> None:
         if callback:
             callback(level, message)
@@ -92,14 +99,18 @@ class TestExecutor:
     def _build_command(self, framework: str, script_path: str, language: str | None = None) -> list[str]:
         framework = framework.lower()
         language = (language or "").lower()
+        python_cmd = self._python_command()
 
         if framework in {"pytest", "selenium"} and script_path.endswith(".py"):
-            return ["python", "-m", "pytest", script_path, "-q"]
+            return [python_cmd, "-m", "pytest", script_path, "-q"]
         if framework == "robotframework":
-            return ["robot", script_path]
+            robot_command = [python_cmd, "-m", "robot", script_path]
+            if self._is_unix_like() and shutil.which("xvfb-run"):
+                return ["xvfb-run", "-a", *robot_command]
+            return robot_command
         if framework == "selenium":
             if language == "python" or script_path.endswith(".py"):
-                return ["python", script_path]
+                return [python_cmd, script_path]
             if language in {"javascript", "typescript"} or script_path.endswith((".js", ".ts")):
                 return ["node", script_path]
             if language == "java":
@@ -118,9 +129,9 @@ class TestExecutor:
             if shutil.which("javac"):
                 return ["javac", script_path]
         if framework == "python":
-            return ["python", script_path]
+            return [python_cmd, script_path]
 
-        return ["python", script_path]
+        return [python_cmd, script_path]
 
     def _determine_filename(self, framework: str, script: str, language: str | None = None) -> str:
         framework = framework.lower()
@@ -188,7 +199,12 @@ class TestExecutor:
 
             if framework.lower() == "robotframework":
                 listener_path = self._write_robot_listener(temp_dir)
-                command = ["robot", "--listener", listener_path, file_path]
+                python_cmd = self._python_command()
+                robot_command = [python_cmd, "-m", "robot", "--listener", listener_path, file_path]
+                if self._is_unix_like() and shutil.which("xvfb-run"):
+                    command = ["xvfb-run", "-a", *robot_command]
+                else:
+                    command = robot_command
 
             execution_log_lines.append(f"[EXECUTION] Command: {' '.join(command)}")
             self._emit(log_callback, "info", f"Executando {' '.join(command)}")
