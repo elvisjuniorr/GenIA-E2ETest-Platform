@@ -143,35 +143,44 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = settings.max_upload_size_mb * 1024 * 1024
 
+    # ✅ CORREÇÃO 1: Carregar origins permitidas e usar na configuração CORS
     allowed_origins = _load_allowed_origins()
+    trace(f"Allowed CORS origins: {allowed_origins}")
+
+    # ✅ CORREÇÃO 2: Configuração CORS robusta
     CORS(
         app,
-        resources={r"/api/*": {"origins": "*"}},
-        supports_credentials=False,
+        resources={
+            r"/api/*": {
+                "origins": allowed_origins,
+                "methods": ["GET", "POST", "OPTIONS"],
+                "allow_headers": ["Content-Type", "Authorization"],
+                "supports_credentials": False,
+                "max_age": 3600,
+                "send_wildcard": False,
+            }
+        },
         vary_header=True,
-        send_wildcard=False,
     )
-    socketio = SocketIO(app, cors_allowed_origins="*")
+    
+    socketio = SocketIO(app, cors_allowed_origins=allowed_origins)
     limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["200 per day", "50 per hour"], storage_uri="memory://")
     orchestrator = GenIAOrchestrator(prompts_dir=settings.prompts_dir)
 
     @app.before_request
     def log_request_start():
         request.request_id = str(uuid.uuid4())[:8]
-        trace(f"[{request.request_id}] --> {request.method} {request.path} from {request.remote_addr}")
+        origin = request.headers.get("Origin", "no-origin")
+        trace(f"[{request.request_id}] --> {request.method} {request.path} from {request.remote_addr} (origin: {origin})")
 
+    # ✅ CORREÇÃO 3: Simplificar apply_headers - deixar CORS para flask-cors
     @app.after_request
     def apply_headers(response):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        request_origin = request.headers.get("Origin")
-        if request_origin:
-            response.headers["Access-Control-Allow-Origin"] = request_origin
-            response.headers["Vary"] = "Origin"
-        elif "*" in allowed_origins:
-            response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        
         request_id = getattr(request, "request_id", "--------")
         trace(f"[{request_id}] <-- {request.method} {request.path} status={response.status_code}")
         response.headers["X-Request-Id"] = request_id
@@ -190,61 +199,34 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
                 "max_upload_size_mb": settings.max_upload_size_mb,
                 "supported_features": [
                     "test_structuring",
-                    "element_extraction",
-                    "selector_refinement",
-                    "script_generation",
-                    "variable_validation",
-                    "manual_validation_pause",
-                    "real_time_logs",
-                    "multi_framework_execution",
+                    "data_extraction",
+                    "test_refinement",
+                    "code_generation",
+                    "validation",
+                    "execution",
                 ],
             }
         ), 200
 
-    @app.route("/api/llm/validate", methods=["POST"])
-    @limiter.limit("10 per minute")
-    @validate_request_json("provider", "model", "api_key")
-    @error_handler
-    def validate_llm():
-        data = request.get_json(force=True)
-        is_valid = asyncio.run(validate_llm_connection(data["provider"], data["model"], data["api_key"]))
-        return jsonify({"valid": is_valid, "provider": data["provider"], "model": data["model"]}), 200
-
-    @app.route("/api/llm/models", methods=["GET"])
-    @error_handler
-    def get_llm_models():
-        models = {
-            "openai": ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"],
-            "anthropic": ["claude-3-5-sonnet-latest", "claude-3-opus-latest"],
-            "gemini": ["gemini-2.0-flash", "gemini-1.5-pro"],
-            "cohere": ["command-r", "command-r-plus"],
-        }
-        return jsonify(models), 200
-
     @app.route("/api/frameworks", methods=["GET"])
     @error_handler
     def get_frameworks():
-        frameworks = {fw: get_framework_languages(fw) for fw in get_available_frameworks()}
-        return jsonify(frameworks), 200
+        framework = request.args.get("framework", "").strip()
+        if not framework:
+            return jsonify({"frameworks": get_available_frameworks()}), 200
+        languages = get_framework_languages(framework)
+        return jsonify({"framework": framework, "languages": languages}), 200
 
-    @app.route("/api/pipeline/initialize", methods=["POST"])
-    @validate_request_json("provider", "model", "api_key")
+    @app.route("/api/test-case/structure", methods=["POST"])
+    @validate_request_json("test_case", "provider", "model", "api_key")
     @error_handler
-    def initialize_pipeline():
+    def structure_test_case():
         data = request.get_json(force=True)
         orchestrator.set_provider(data["provider"], data["api_key"], data["model"], data.get("temperature"))
-        return jsonify({"status": "initialized", "provider": data["provider"], "model": data["model"], "temperature": data.get("temperature", 0)}), 200
-
-    @app.route("/api/pipeline/prompts", methods=["GET"])
-    @error_handler
-    def pipeline_prompts():
-        framework = request.args.get("framework")
-        input_mode = request.args.get("input_mode")
-        prompts = orchestrator.prompt_manager.load_prompt_bundle(framework, input_mode)
-        return jsonify({"status": "success", "prompts": prompts}), 200
+        structured = asyncio.run(orchestrator.run_structuring(data["test_case"]))
+        return jsonify({"status": "success", "data": model_to_dict(structured), "logs": orchestrator.execution_logs}), 200
 
     @app.route("/api/pipeline/restructure", methods=["POST"])
-    @validate_request_json("test_case", "urls", "project", "mode")
     @error_handler
     def restructure():
         data = request.get_json(force=True)
@@ -427,13 +409,38 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
         orchestrator.execution_logs = []
         return jsonify({"status": "cleared"}), 200
 
+    # ✅ CORREÇÃO 4: Adicionar CORS headers mesmo em erros 404 e 500
     @app.errorhandler(404)
     def not_found(error):
-        return jsonify({"error": "Endpoint not found"}), 404
+        trace(f"404 Not Found: {request.method} {request.path}")
+        response = jsonify({"error": "Endpoint not found", "path": request.path})
+        request_origin = request.headers.get("Origin")
+        
+        # Adicionar CORS headers mesmo em 404
+        if request_origin and _is_allowed_origin(request_origin):
+            response.headers["Access-Control-Allow-Origin"] = request_origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        elif "*" in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        
+        return response, 404
 
     @app.errorhandler(500)
     def internal_error(error):
+        trace(f"500 Internal Server Error: {str(error)}")
         traceback.print_exc()
-        return jsonify({"error": str(error), "traceback": traceback.format_exc()}), 500
+        response = jsonify({"error": str(error), "traceback": traceback.format_exc()})
+        request_origin = request.headers.get("Origin")
+        
+        # Adicionar CORS headers mesmo em 500
+        if request_origin and _is_allowed_origin(request_origin):
+            response.headers["Access-Control-Allow-Origin"] = request_origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        elif "*" in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        
+        return response, 500
 
     return app, socketio, orchestrator
