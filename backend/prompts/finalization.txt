@@ -20,7 +20,11 @@ INPUTS:
 CONTEXT PLACEHOLDERS:
 - {pipeline_context}
 - {execution_results}
+- {execution_screenshots}
+- {primary_screenshot}
+- {image_evidence}
 - {homologation_results}
+- {homologation_screenshots}
 - {validation_data}
 - {manual_changes}
 - {logs}

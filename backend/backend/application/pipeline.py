@@ -179,6 +179,29 @@ def _compact_execution_result(execution_result: Any) -> dict[str, Any]:
     }
 
 
+def _compact_execution_artifacts(execution_result: Any) -> dict[str, Any]:
+    data = _model_dump(execution_result)
+    if not isinstance(data, dict):
+        return {"screenshots": [], "primary_screenshot": None, "image_evidence": []}
+
+    screenshots = [path for path in (data.get("screenshots") or []) if isinstance(path, str) and path.strip()]
+    evidence = [path for path in (data.get("evidence") or []) if isinstance(path, str) and path.strip()]
+    image_evidence = [
+        path
+        for path in evidence
+        if Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
+    ]
+    combined_screenshots = screenshots or image_evidence
+
+    return {
+        "screenshots": _compact_sequence(combined_screenshots, 5),
+        "primary_screenshot": combined_screenshots[0] if combined_screenshots else None,
+        "image_evidence": _compact_sequence(image_evidence, 5),
+        "screenshot_count": len(combined_screenshots),
+        "evidence_count": len(evidence),
+    }
+
+
 def _require_crawl4ai() -> None:
     if AsyncWebCrawler is None:
         raise RuntimeError(
@@ -247,7 +270,6 @@ class ExtractionStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
-        session_id: str,
         headless: bool = True,
         prompt_override: str | None = None,
     ) -> List[ExtractedElement]:
@@ -276,19 +298,23 @@ class ExtractionStage(PipelineStageRunner):
             word_count_threshold=1,
             extraction_strategy=llm_strategy,
             cache_mode=CacheMode.BYPASS,
-            session_id=session_id,
+            # session_id=session_id,
 
-            page_timeout=120000,
+            # page_timeout=120000,
 
-            wait_until="domcontentloaded",
+            # wait_until="domcontentloaded",
 
-            delay_before_return_html=0.5,
+            # delay_before_return_html=0.5,
         )
 
         results = await crawler.arun_many(urls=[module.url], config=crawl_config)
         result = results[0]
         if not result.success:
             raise Exception(f"Crawling failed for {module.url}")
+
+        html_snapshot = _extract_html_snapshot(result)
+        if html_snapshot:
+            module.source_html = html_snapshot
 
         extracted_items = json.loads(result.extracted_content)
         return [ExtractedElement(**item) for item in extracted_items]
@@ -302,7 +328,6 @@ class RefinementStage(PipelineStageRunner):
         api_key: str,
         model: str,
         provider: str,
-        session_id: str,
         headless: bool = True,
         prompt_override: str | None = None,
     ) -> List[ExtractedElement]:
@@ -310,42 +335,23 @@ class RefinementStage(PipelineStageRunner):
         final_prompt = _append_context_block(
             _render_prompt(
                 prompt,
-                Extracted_Elements=module,
-                extracted_elements=module.extracted_data or [],
                 refined_module=module,
+                extracted_elements=module.extracted_data or [],
+                source_html=module.source_html or "",
+                refinement_context={
+                    "module": module,
+                    "extracted_elements": module.extracted_data or [],
+                    "source_html": module.source_html or "",
+                },
             ),
-            {"extracted_elements": module.extracted_data or [], "refined_module": module},
+            {
+                "extracted_elements": module.extracted_data or [],
+                "refined_module": module,
+                "source_html": module.source_html or "",
+            },
         )
-
-        llm_strategy = LLMExtractionStrategy(
-            llm_config=LLMConfig(provider=f"{provider}/{model}", api_token=api_key),
-            schema=ExtractedElement.model_json_schema(),
-            extraction_type="schema",
-            input_format="html",
-            instruction=final_prompt,
-        )
-
-        crawl_config = CrawlerRunConfig(
-            verbose=True,
-            word_count_threshold=1,
-            extraction_strategy=llm_strategy,
-            cache_mode=CacheMode.BYPASS,
-            session_id=session_id,
-
-            page_timeout=120000,
-
-            wait_until="domcontentloaded",
-
-            delay_before_return_html=0.5,
-        )
-
-        results = await crawler.arun_many(urls=[module.url], config=crawl_config)
-        result = results[0]
-        if not result.success:
-            raise Exception(f"Refinement failed for {module.url}")
-
-        refined_items = json.loads(result.extracted_content)
-        return [ExtractedElement(**item) for item in refined_items]
+        raw = self.llm.generate_json(api_key, model, final_prompt)
+        return _normalize_extracted_elements(raw)
 
 
 class GenerationStage(PipelineStageRunner):
@@ -538,11 +544,15 @@ class HomologationStage(PipelineStageRunner):
         prompt_override: str | None = None,
     ) -> Dict[str, Any]:
         prompt = prompt_override or self.prompt_manager.load_prompt("homologation")
+        visual_context = _compact_execution_artifacts(execution_result)
         final_prompt = _append_context_block(
             _render_prompt(
                 prompt,
                 execution_results=execution_result,
                 execution=execution_result,
+                execution_screenshots=visual_context.get("screenshots"),
+                primary_screenshot=visual_context.get("primary_screenshot"),
+                image_evidence=visual_context.get("image_evidence"),
                 refined_data=refined,
                 refined=refined,
                 validation_data=validation_data,
@@ -552,6 +562,7 @@ class HomologationStage(PipelineStageRunner):
                 script=script,
                 homologation_context={
                     "execution_result": execution_result,
+                    "visual_context": visual_context,
                     "refined": refined,
                     "validation": validation_data,
                     "manual_changes": manual_changes,
@@ -560,6 +571,9 @@ class HomologationStage(PipelineStageRunner):
             ),
             {
                 "execution_results": execution_result,
+                "execution_screenshots": visual_context.get("screenshots"),
+                "primary_screenshot": visual_context.get("primary_screenshot"),
+                "image_evidence": visual_context.get("image_evidence"),
                 "refined_data": refined,
                 "validation_data": validation_data,
                 "manual_changes": manual_changes,
@@ -580,6 +594,8 @@ class FinalizationStage(PipelineStageRunner):
         prompt_override: str | None = None,
     ) -> Dict[str, Any]:
         prompt = prompt_override or self.prompt_manager.load_prompt("finalization")
+        execution_artifacts = _compact_execution_artifacts(payload.get("execution"))
+        homologation_artifacts = _compact_execution_artifacts(payload.get("execution"))
         final_prompt = _render_prompt(
             prompt,
             final_report=payload,
@@ -595,9 +611,15 @@ class FinalizationStage(PipelineStageRunner):
                 "timeline": payload.get("timeline"),
                 "logs": payload.get("logs"),
                 "prompts_used": payload.get("prompts_used"),
+                "execution_artifacts": execution_artifacts,
+                "homologation_artifacts": homologation_artifacts,
             },
             execution_results=payload.get("execution"),
+            execution_screenshots=execution_artifacts.get("screenshots"),
+            primary_screenshot=execution_artifacts.get("primary_screenshot"),
+            image_evidence=execution_artifacts.get("image_evidence"),
             homologation_results=payload.get("homologation"),
+            homologation_screenshots=homologation_artifacts.get("screenshots"),
             validation_data=payload.get("inputs", {}).get("validation"),
             manual_changes=payload.get("inputs", {}).get("manual_changes"),
             logs=payload.get("logs"),
@@ -620,6 +642,7 @@ class RefactoringStage(PipelineStageRunner):
         prompt_override: str | None = None,
     ) -> Dict[str, Any]:
         prompt = prompt_override or self.prompt_manager.load_prompt("refactoring")
+        execution_artifacts = _compact_execution_artifacts(execution_result)
         confirmed_script = (
             final_report.get("script", {}).get("confirmed", original_script)
             if isinstance(final_report, dict)
@@ -633,6 +656,9 @@ class RefactoringStage(PipelineStageRunner):
                 confirmed_script=confirmed_script,
                 execution_results=execution_result,
                 execution=execution_result,
+                execution_screenshots=execution_artifacts.get("screenshots"),
+                primary_screenshot=execution_artifacts.get("primary_screenshot"),
+                image_evidence=execution_artifacts.get("image_evidence"),
                 homologation_results=homologation,
                 homologation=homologation,
                 finalization_context=final_report,
@@ -641,6 +667,7 @@ class RefactoringStage(PipelineStageRunner):
                     "original_script": original_script,
                     "confirmed_script": confirmed_script,
                     "execution_result": execution_result,
+                    "visual_context": execution_artifacts,
                     "homologation": homologation,
                     "final_report": final_report,
                 },
@@ -649,6 +676,9 @@ class RefactoringStage(PipelineStageRunner):
                 "original_script": original_script,
                 "confirmed_script": confirmed_script,
                 "execution_result": execution_result,
+                "execution_screenshots": execution_artifacts.get("screenshots"),
+                "primary_screenshot": execution_artifacts.get("primary_screenshot"),
+                "image_evidence": execution_artifacts.get("image_evidence"),
                 "homologation": homologation,
                 "final_report": final_report,
             },
@@ -673,6 +703,35 @@ def _map_extracted_data_to_steps(module: Module):
             step.extracted_data = matched_data
 
     return module
+
+
+def _extract_html_snapshot(result: Any) -> str | None:
+    for attr in ("cleaned_html", "html", "page_source", "raw_html", "markdown"):
+        value = getattr(result, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _normalize_extracted_elements(raw: Any) -> List[ExtractedElement]:
+    if not raw:
+        return []
+
+    if isinstance(raw, dict):
+        candidates = raw.get("items") or raw.get("elements") or raw.get("extracted_elements") or raw.get("data") or []
+    else:
+        candidates = raw
+
+    if not isinstance(candidates, list):
+        candidates = [candidates]
+
+    normalized: list[ExtractedElement] = []
+    for item in candidates:
+        if isinstance(item, ExtractedElement):
+            normalized.append(item)
+        elif isinstance(item, dict):
+            normalized.append(ExtractedElement(**item))
+    return normalized
 
 
 def _sanitize_module_tree(test_case: TestCase | dict[str, Any]) -> dict[str, Any]:
@@ -838,7 +897,7 @@ class GenIAOrchestrator:
             self.current_provider,
         )
 
-    async def run_extraction(self, module: Module, session_id: str, headless: bool = True) -> List[ExtractedElement]:
+    async def run_extraction(self, module: Module, headless: bool = True) -> List[ExtractedElement]:
         _require_crawl4ai()
         async with AsyncWebCrawler(config=BrowserConfig(headless=headless)) as crawler:
             return await ExtractionStage(self.llm_provider, self.prompt_manager).execute(
@@ -847,11 +906,10 @@ class GenIAOrchestrator:
                 self.current_api_key,
                 self.current_model,
                 self.current_provider,
-                session_id,
                 headless,
             )
 
-    async def run_refinement(self, module: Module,  session_id: str, headless: bool = True) -> List[ExtractedElement]:
+    async def run_refinement(self, module: Module, headless: bool = True) -> List[ExtractedElement]:
         _require_crawl4ai()
         async with AsyncWebCrawler(config=BrowserConfig(headless=headless)) as crawler:
             return await RefinementStage(self.llm_provider, self.prompt_manager).execute(
@@ -860,7 +918,6 @@ class GenIAOrchestrator:
                 self.current_api_key,
                 self.current_model,
                 self.current_provider,
-                session_id,
                 headless,
             )
 
@@ -1035,16 +1092,9 @@ class GenIAOrchestrator:
             extracted_test = structured.model_copy(deep=True)
             refined_test = structured.model_copy(deep=True)
 
-            browser_config = BrowserConfig(
-                headless=True,
-                extra_args=[
-                    "--disable-dev-shm-usage",
-                    "--no-sandbox",
-                    "--disable-gpu"
-                ])
+            browser_config = BrowserConfig(headless=headless)
             async with AsyncWebCrawler(config=browser_config) as crawler:
                 for idx, module in enumerate(structured.modules, 1):
-                    session_id= "module_" + str(idx)
                     module_start = datetime.now()
                     self._set_session_state(pipeline_id, PipelineStage.EXTRACTION.value)
                     self.push_event(
@@ -1061,10 +1111,10 @@ class GenIAOrchestrator:
                         extraction_api_key,
                         extraction_model,
                         extraction_provider,
-                        session_id,
                         headless,
                         prompt_override=(prompt_overrides or {}).get("extraction"),
                     )
+                    extracted_test.modules[idx - 1].source_html = getattr(module, "source_html", None)
                     extracted_test.modules[idx - 1].extracted_data = extracted_elements
                     extracted_test.modules[idx - 1] = _map_extracted_data_to_steps(extracted_test.modules[idx - 1])
                     self.push_event(
@@ -1084,13 +1134,14 @@ class GenIAOrchestrator:
 
                     self._set_session_state(pipeline_id, PipelineStage.REFINEMENT.value)
                     refinement_provider, refinement_model, refinement_api_key = self._resolve_stage_llm("refinement", llm_overrides)
+                    refined_test.modules[idx - 1].source_html = getattr(extracted_test.modules[idx - 1], "source_html", None)
+                    refined_test.modules[idx - 1].extracted_data = extracted_elements
                     refined_elements = await RefinementStage(self.llm_provider, self.prompt_manager).execute(
                         crawler,
                         extracted_test.modules[idx - 1],
                         refinement_api_key,
                         refinement_model,
                         refinement_provider,
-                        session_id,
                         headless,
                         prompt_override=(prompt_overrides or {}).get("refinement"),
                     )
@@ -1300,6 +1351,7 @@ class GenIAOrchestrator:
         )
         self.push_event("STAGE_DONE", "homologation", homologation, pipeline_id)
 
+        execution_artifacts = _compact_execution_artifacts(execution_result)
         finalization_input = {
             "pipeline_id": pipeline_id,
             "inputs": {
@@ -1324,6 +1376,7 @@ class GenIAOrchestrator:
                 "confirmed": _truncate_text(confirmed_script, 5000),
             },
             "execution": _compact_execution_result(execution_result),
+            "execution_artifacts": execution_artifacts,
             "homologation": {
                 key: _truncate_text(value, 2500)
                 for key, value in (homologation or {}).items()

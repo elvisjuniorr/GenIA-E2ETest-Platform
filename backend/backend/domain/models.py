@@ -48,6 +48,7 @@ class Module(BaseModel):
     purpose: str = Field(..., description="Page role in test case")
     execution_steps: List[ExecutionStep] = Field(default_factory=list)
     extracted_data: Optional[List[ExtractedElement]] = None
+    source_html: Optional[str] = None
 
 
 class TestCase(BaseModel):

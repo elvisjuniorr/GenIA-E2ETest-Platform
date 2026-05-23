@@ -11,3 +11,4 @@ anthropic
 cohere
 flask-socketio
 gunicorn
+selenium

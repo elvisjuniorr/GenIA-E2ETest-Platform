@@ -16,6 +16,9 @@ CONTEXT PLACEHOLDERS:
 - {original_script}
 - {confirmed_script}
 - {execution_results}
+- {execution_screenshots}
+- {primary_screenshot}
+- {image_evidence}
 - {homologation_results}
 - {final_report}
 - {manual_changes}

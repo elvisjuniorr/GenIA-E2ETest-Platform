@@ -16,6 +16,9 @@ INPUTS:
 
 CONTEXT PLACEHOLDERS:
 - {execution_results}
+- {execution_screenshots}
+- {primary_screenshot}
+- {image_evidence}
 - {refined_data}
 - {validation_data}
 - {manual_changes}
