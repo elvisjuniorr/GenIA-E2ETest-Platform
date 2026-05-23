@@ -1455,7 +1455,17 @@ class GenIAOrchestrator:
                         pipeline_id,
                     ),
                 )
-                self.push_event("STAGE_DONE", "execution", _model_dump(execution_result), pipeline_id)
+                execution_artifacts = _compact_execution_artifacts(execution_result)
+                self.push_event(
+                    "STAGE_DONE",
+                    "execution",
+                    {
+                        **_model_dump(execution_result),
+                        "execution_artifacts": execution_artifacts,
+                        "primary_screenshot": execution_artifacts.get("primary_screenshot"),
+                    },
+                    pipeline_id,
+                )
 
                 self._set_session_state(pipeline_id, PipelineStage.HOMOLOGATION.value)
                 self.push_event("STAGE_START", "homologation", {}, pipeline_id)
@@ -1472,7 +1482,6 @@ class GenIAOrchestrator:
                 )
                 self.push_event("STAGE_DONE", "homologation", homologation, pipeline_id)
 
-                execution_artifacts = _compact_execution_artifacts(execution_result)
                 finalization_input = {
                     "pipeline_id": pipeline_id,
                     "inputs": {
