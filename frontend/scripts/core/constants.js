@@ -38,7 +38,8 @@
       { key: "finalization", label: "Finalização", promptKey: "finalization", resultId: "finalizationContent" },
       { key: "refactoring", label: "Refatoração", promptKey: "refactoring", resultId: "refactoringContent" },
     ],
-    API_BASE_URL: "https://genia-e2etest-platform-back.onrender.com/api",
+    API_BASE_URL: "https://genia-e2etest-ai-driven-platform.onrender.com/api",
+    // API_BASE_URL: "https://genia-e2etest-platform-back.onrender.com/api",
     // API_BASE_URL: "http://localhost:5000/api",
   };
 })();
