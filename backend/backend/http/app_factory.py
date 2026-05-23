@@ -70,6 +70,22 @@ def _is_allowed_origin(origin: str | None) -> bool:
     return bool(re.match(r"^https://[a-z0-9-]+(?:\.[a-z0-9-]+)*\.onrender\.com$", origin))
 
 
+def _apply_cors_headers(response, origin: str | None = None) -> Any:
+    request_origin = origin or request.headers.get("Origin")
+    if request_origin and _is_allowed_origin(request_origin):
+        response.headers["Access-Control-Allow-Origin"] = request_origin
+        response.headers["Vary"] = "Origin"
+    elif "*" in _load_allowed_origins():
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = request.headers.get(
+        "Access-Control-Request-Headers",
+        "Content-Type, Authorization",
+    )
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Max-Age"] = "3600"
+    return response
+
+
 def validate_request_json(*required_fields):
     def decorator(f):
         @wraps(f)
@@ -178,13 +194,16 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     def apply_headers(response):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        
         request_id = getattr(request, "request_id", "--------")
         trace(f"[{request_id}] <-- {request.method} {request.path} status={response.status_code}")
         response.headers["X-Request-Id"] = request_id
-        return response
+        return _apply_cors_headers(response)
+
+    @app.route("/api/<path:path>", methods=["OPTIONS"])
+    @app.route("/api", methods=["OPTIONS"])
+    def api_preflight(path: str | None = None):
+        response = jsonify({"ok": True, "path": path})
+        return _apply_cors_headers(response), 200
 
     @app.route("/api/health", methods=["GET"])
     def health_check():
@@ -414,33 +433,13 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     def not_found(error):
         trace(f"404 Not Found: {request.method} {request.path}")
         response = jsonify({"error": "Endpoint not found", "path": request.path})
-        request_origin = request.headers.get("Origin")
-        
-        # Adicionar CORS headers mesmo em 404
-        if request_origin and _is_allowed_origin(request_origin):
-            response.headers["Access-Control-Allow-Origin"] = request_origin
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        elif "*" in allowed_origins:
-            response.headers["Access-Control-Allow-Origin"] = "*"
-        
-        return response, 404
+        return _apply_cors_headers(response), 404
 
     @app.errorhandler(500)
     def internal_error(error):
         trace(f"500 Internal Server Error: {str(error)}")
         traceback.print_exc()
         response = jsonify({"error": str(error), "traceback": traceback.format_exc()})
-        request_origin = request.headers.get("Origin")
-        
-        # Adicionar CORS headers mesmo em 500
-        if request_origin and _is_allowed_origin(request_origin):
-            response.headers["Access-Control-Allow-Origin"] = request_origin
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        elif "*" in allowed_origins:
-            response.headers["Access-Control-Allow-Origin"] = "*"
-        
-        return response, 500
+        return _apply_cors_headers(response), 500
 
     return app, socketio, orchestrator
