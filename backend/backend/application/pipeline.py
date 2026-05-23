@@ -7,6 +7,7 @@ import html
 import json
 import logging
 import os
+import re
 import queue
 import threading
 import traceback
@@ -90,6 +91,18 @@ def _truncate_text(value: Any, limit: int = 1200) -> Any:
     if len(value) <= limit:
         return value
     return f"{value[:limit].rstrip()}... [truncated]"
+
+
+def _compact_html_snapshot(value: Any, limit: int = 12000) -> str:
+    if not isinstance(value, str):
+        return ""
+    compacted = re.sub(r"\s+", " ", value).strip()
+    if len(compacted) <= limit:
+        return compacted
+    half = max(1, limit // 2)
+    head = compacted[:half].rstrip()
+    tail = compacted[-half:].lstrip()
+    return f"{head} ... [truncated] ... {tail}"
 
 
 def _compact_log_entries(entries: Any, limit: int = 80, text_limit: int = 300) -> list[dict[str, Any]]:
@@ -202,12 +215,34 @@ def _compact_execution_artifacts(execution_result: Any) -> dict[str, Any]:
     }
 
 
+def _compact_module_snapshot(module: Any, html_limit: int = 12000) -> dict[str, Any]:
+    data = _model_dump(module)
+    if not isinstance(data, dict):
+        return {"value": _truncate_text(str(data), 1500)}
+    source_html = data.get("source_html") or ""
+    return {
+        "url": data.get("url"),
+        "purpose": data.get("purpose"),
+        "execution_steps": _compact_sequence(data.get("execution_steps") or [], 50),
+        "extracted_data": _compact_sequence(data.get("extracted_data") or [], 50),
+        "source_html": _compact_html_snapshot(source_html, html_limit) if source_html else "",
+    }
+
+
 def _require_crawl4ai() -> None:
     if AsyncWebCrawler is None:
         raise RuntimeError(
             "crawl4ai is not installed in this environment. "
             "Install the backend dependencies to use extraction and refinement."
         )
+
+
+def _create_browser_config(headless: bool) -> Any:
+    return BrowserConfig(
+        browser_type="chromium",
+        headless=headless,
+        verbose=True,
+    )
 
 
 def _iso_now() -> str:
@@ -319,23 +354,20 @@ class ExtractionStage(PipelineStageRunner):
             word_count_threshold=1,
             extraction_strategy=llm_strategy,
             cache_mode=CacheMode.BYPASS,
-            # session_id=session_id,
-
-            # page_timeout=120000,
-
-            # wait_until="domcontentloaded",
-
-            # delay_before_return_html=0.5,
+            wait_until="domcontentloaded",
+            page_timeout=120000,
+            delay_before_return_html=0.5,
+            screenshot=False,
         )
 
-        results = await crawler.arun_many(urls=[module.url], config=crawl_config)
-        result = results[0]
+        result = await crawler.arun(url=module.url, config=crawl_config)
         if not result.success:
-            raise Exception(f"Crawling failed for {module.url}")
+            error_message = getattr(result, "error_message", None) or f"Crawling failed for {module.url}"
+            raise RuntimeError(error_message)
 
         html_snapshot = _extract_html_snapshot(result)
         if html_snapshot:
-            module.source_html = html_snapshot
+            module.source_html = _compact_html_snapshot(html_snapshot)
 
         extracted_items = json.loads(result.extracted_content)
         return [ExtractedElement(**item) for item in extracted_items]
@@ -344,7 +376,7 @@ class ExtractionStage(PipelineStageRunner):
 class RefinementStage(PipelineStageRunner):
     async def execute(
         self,
-        crawler: AsyncWebCrawler,
+        crawler: Any,
         module: Module,
         api_key: str,
         model: str,
@@ -353,23 +385,21 @@ class RefinementStage(PipelineStageRunner):
         headless: bool = True,
         prompt_override: str | None = None,
     ) -> List[ExtractedElement]:
+        del crawler, headless
         prompt = prompt_override or self.prompt_manager.load_prompt("refinement")
-        final_prompt = _append_context_block(
-            _render_prompt(
-                prompt,
-                refined_module=module,
-                extracted_elements=module.extracted_data or [],
-                source_html=module.source_html or "",
-                refinement_context={
-                    "module": module,
-                    "extracted_elements": module.extracted_data or [],
-                    "source_html": module.source_html or "",
-                },
-            ),
-            {
-                "extracted_elements": module.extracted_data or [],
-                "refined_module": module,
-                "source_html": module.source_html or "",
+        structured_module = _compact_module_snapshot(module)
+        extracted_elements = _model_dump_list(module.extracted_data or [])
+        source_html = _compact_html_snapshot(module.source_html or "")
+        final_prompt = _render_prompt(
+            prompt,
+            structured_json=structured_module,
+            refined_module=structured_module,
+            extracted_elements=extracted_elements,
+            source_html=source_html,
+            refinement_context={
+                "module": structured_module,
+                "extracted_elements": extracted_elements,
+                "source_html": source_html,
             },
         )
         raw = self.llm.generate_json(api_key, model, final_prompt, temperature=temperature)
@@ -734,7 +764,7 @@ def _map_extracted_data_to_steps(module: Module):
 
 
 def _extract_html_snapshot(result: Any) -> str | None:
-    for attr in ("cleaned_html", "html", "page_source", "raw_html", "markdown"):
+    for attr in ("html", "raw_html", "page_source", "cleaned_html", "markdown"):
         value = getattr(result, attr, None)
         if isinstance(value, str) and value.strip():
             return value
@@ -958,7 +988,7 @@ class GenIAOrchestrator:
         prompt_override: str | None = None,
     ) -> List[ExtractedElement]:
         _require_crawl4ai()
-        async with AsyncWebCrawler(config=BrowserConfig(headless=headless)) as crawler:
+        async with AsyncWebCrawler(config=_create_browser_config(headless)) as crawler:
             return await ExtractionStage(self.llm_provider, self.prompt_manager).execute(
                 crawler,
                 module,
@@ -977,18 +1007,16 @@ class GenIAOrchestrator:
         temperature: float | None = None,
         prompt_override: str | None = None,
     ) -> List[ExtractedElement]:
-        _require_crawl4ai()
-        async with AsyncWebCrawler(config=BrowserConfig(headless=headless)) as crawler:
-            return await RefinementStage(self.llm_provider, self.prompt_manager).execute(
-                crawler,
-                module,
-                self.current_api_key,
-                self.current_model,
-                self.current_provider,
-                temperature=temperature if temperature is not None else self.current_temperature,
-                headless=headless,
-                prompt_override=prompt_override,
-            )
+        return await RefinementStage(self.llm_provider, self.prompt_manager).execute(
+            None,
+            module,
+            self.current_api_key,
+            self.current_model,
+            self.current_provider,
+            temperature=temperature if temperature is not None else self.current_temperature,
+            headless=headless,
+            prompt_override=prompt_override,
+        )
 
     async def run_generation(
         self,
@@ -1200,7 +1228,7 @@ class GenIAOrchestrator:
                 extracted_test = structured.model_copy(deep=True)
                 refined_test = structured.model_copy(deep=True)
 
-                browser_config = BrowserConfig(headless=headless)
+                browser_config = _create_browser_config(headless)
                 async with AsyncWebCrawler(config=browser_config) as crawler:
                     for idx, module in enumerate(structured.modules, 1):
                         module_start = datetime.now()
