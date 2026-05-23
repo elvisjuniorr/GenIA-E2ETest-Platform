@@ -12,3 +12,5 @@ cohere
 flask-socketio
 gunicorn
 selenium
+robotframework
+robotframework-seleniumlibrary
