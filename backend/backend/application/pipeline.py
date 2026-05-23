@@ -235,6 +235,15 @@ def _require_crawl4ai() -> None:
             "crawl4ai is not installed in this environment. "
             "Install the backend dependencies to use extraction and refinement."
         )
+    if BrowserConfig is not None:
+        try:
+            BrowserConfig.set_defaults(
+                # cache_cdp_connection=True,
+                # cdp_close_delay=0,
+                # create_isolated_context=True,
+            )
+        except Exception:
+            pass
 
 
 def _create_browser_config(headless: bool) -> Any:
@@ -242,6 +251,22 @@ def _create_browser_config(headless: bool) -> Any:
         browser_type="chromium",
         headless=headless,
         verbose=True,
+        # cache_cdp_connection=True,
+        # cdp_close_delay=0,
+        # create_isolated_context=True,
+    )
+
+
+def _is_crawl4ai_browser_lifecycle_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "browsertype.launch",
+            "target page, context or browser has been closed",
+            "browser has been closed",
+            "browser closed",
+        )
     )
 
 
@@ -988,7 +1013,10 @@ class GenIAOrchestrator:
         prompt_override: str | None = None,
     ) -> List[ExtractedElement]:
         _require_crawl4ai()
-        async with AsyncWebCrawler(config=_create_browser_config(headless)) as crawler:
+        browser_config = _create_browser_config(headless)
+        crawler = AsyncWebCrawler(config=browser_config, thread_safe=True)
+        try:
+            await crawler.start()
             return await ExtractionStage(self.llm_provider, self.prompt_manager).execute(
                 crawler,
                 module,
@@ -999,6 +1027,11 @@ class GenIAOrchestrator:
                 headless=headless,
                 prompt_override=prompt_override,
             )
+        finally:
+            try:
+                await crawler.close()
+            except Exception:
+                pass
 
     async def run_refinement(
         self,
@@ -1166,6 +1199,9 @@ class GenIAOrchestrator:
             self.execution_logs = []
             start_time = datetime.now()
             pipeline_id = pipeline_id or str(uuid.uuid4())
+            prompt_overrides = prompt_overrides or {}
+            llm_overrides = llm_overrides or {}
+            manual_urls = manual_urls or []
 
             try:
                 _require_crawl4ai()
@@ -1175,14 +1211,14 @@ class GenIAOrchestrator:
                     input_mode=input_mode,
                     user_story_content=user_story_content,
                     user_story_filename=user_story_filename,
-                    manual_urls=manual_urls or [],
+                    manual_urls=manual_urls,
                     framework=framework,
                     language=language,
                     test_name=test_name,
                     headless=headless,
                     attempt=attempt,
-                    prompt_overrides=prompt_overrides or {},
-                    llm_overrides=llm_overrides or {},
+                    prompt_overrides=prompt_overrides,
+                    llm_overrides=llm_overrides,
                 )
 
                 self.push_event(
@@ -1211,8 +1247,8 @@ class GenIAOrchestrator:
                     input_mode=input_mode,
                     user_story_content=user_story_content,
                     user_story_filename=user_story_filename,
-                    manual_urls=manual_urls or [],
-                    prompt_override=(prompt_overrides or {}).get("structuring"),
+                    manual_urls=manual_urls,
+                    prompt_override=prompt_overrides.get("structuring"),
                 )
                 self.push_event(
                     "STAGE_DONE",
@@ -1225,79 +1261,102 @@ class GenIAOrchestrator:
                     pipeline_id,
                 )
 
+                browser_config = _create_browser_config(headless)
                 extracted_test = structured.model_copy(deep=True)
                 refined_test = structured.model_copy(deep=True)
+                crawler_retry_errors: list[str] = []
 
-                browser_config = _create_browser_config(headless)
-                async with AsyncWebCrawler(config=browser_config) as crawler:
-                    for idx, module in enumerate(structured.modules, 1):
-                        module_start = datetime.now()
-                        self._set_session_state(pipeline_id, PipelineStage.EXTRACTION.value)
-                        self.push_event(
-                            "MODULE_START",
-                            "extraction",
-                            {"index": idx, "total": len(structured.modules), "url": module.url},
-                            pipeline_id,
-                        )
+                for crawler_attempt in range(2):
+                    crawler = AsyncWebCrawler(config=browser_config, thread_safe=True)
+                    try:
+                        await crawler.start()
+                        for idx, module in enumerate(structured.modules, 1):
+                            module_start = datetime.now()
+                            self._set_session_state(pipeline_id, PipelineStage.EXTRACTION.value)
+                            self.push_event(
+                                "MODULE_START",
+                                "extraction",
+                                {"index": idx, "total": len(structured.modules), "url": module.url},
+                                pipeline_id,
+                            )
 
-                        extraction_provider, extraction_model, extraction_api_key, extraction_temperature = self._resolve_stage_llm("extraction", llm_overrides)
-                        extracted_elements = await ExtractionStage(self.llm_provider, self.prompt_manager).execute(
-                            crawler,
-                            module,
-                            extraction_api_key,
-                            extraction_model,
-                            extraction_provider,
-                            temperature=extraction_temperature,
-                            headless=headless,
-                            prompt_override=(prompt_overrides or {}).get("extraction"),
-                        )
-                        extracted_test.modules[idx - 1].source_html = getattr(module, "source_html", None)
-                        extracted_test.modules[idx - 1].extracted_data = extracted_elements
-                        extracted_test.modules[idx - 1] = _map_extracted_data_to_steps(extracted_test.modules[idx - 1])
-                        self.push_event(
-                            "EXTRACTION_DONE",
-                            "extraction",
-                            {
-                                "index": idx,
-                                "total": len(structured.modules),
-                                "module": module.url,
-                                "elements_count": len(extracted_elements),
-                                "elements": _model_dump_list(extracted_elements),
-                                "extracted_snapshot": _sanitize_module_tree(extracted_test),
-                                "duration_ms": (datetime.now() - module_start).total_seconds() * 1000,
-                            },
-                            pipeline_id,
-                        )
+                            extraction_provider, extraction_model, extraction_api_key, extraction_temperature = self._resolve_stage_llm("extraction", llm_overrides)
+                            extracted_elements = await ExtractionStage(self.llm_provider, self.prompt_manager).execute(
+                                crawler,
+                                module,
+                                extraction_api_key,
+                                extraction_model,
+                                extraction_provider,
+                                temperature=extraction_temperature,
+                                headless=headless,
+                                prompt_override=prompt_overrides.get("extraction"),
+                            )
+                            extracted_test.modules[idx - 1].source_html = getattr(module, "source_html", None)
+                            extracted_test.modules[idx - 1].extracted_data = extracted_elements
+                            extracted_test.modules[idx - 1] = _map_extracted_data_to_steps(extracted_test.modules[idx - 1])
+                            self.push_event(
+                                "EXTRACTION_DONE",
+                                "extraction",
+                                {
+                                    "index": idx,
+                                    "total": len(structured.modules),
+                                    "module": module.url,
+                                    "elements_count": len(extracted_elements),
+                                    "elements": _model_dump_list(extracted_elements),
+                                    "extracted_snapshot": _sanitize_module_tree(extracted_test),
+                                    "duration_ms": (datetime.now() - module_start).total_seconds() * 1000,
+                                },
+                                pipeline_id,
+                            )
 
-                        self._set_session_state(pipeline_id, PipelineStage.REFINEMENT.value)
-                        refinement_provider, refinement_model, refinement_api_key, refinement_temperature = self._resolve_stage_llm("refinement", llm_overrides)
-                        refined_test.modules[idx - 1].source_html = getattr(extracted_test.modules[idx - 1], "source_html", None)
-                        refined_test.modules[idx - 1].extracted_data = extracted_elements
-                        refined_elements = await RefinementStage(self.llm_provider, self.prompt_manager).execute(
-                            crawler,
-                            extracted_test.modules[idx - 1],
-                            refinement_api_key,
-                            refinement_model,
-                            refinement_provider,
-                            temperature=refinement_temperature,
-                            headless=headless,
-                            prompt_override=(prompt_overrides or {}).get("refinement"),
-                        )
-                        refined_test.modules[idx - 1].extracted_data = refined_elements
-                        refined_test.modules[idx - 1] = _map_extracted_data_to_steps(refined_test.modules[idx - 1])
-                        self.push_event(
-                            "REFINEMENT_DONE",
-                            "refinement",
-                            {
-                                "index": idx,
-                                "total": len(structured.modules),
-                                "module": module.url,
-                                "elements_count": len(refined_elements),
-                                "elements": _model_dump_list(refined_elements),
-                                "refined_snapshot": _sanitize_module_tree(refined_test),
-                            },
-                            pipeline_id,
-                        )
+                            self._set_session_state(pipeline_id, PipelineStage.REFINEMENT.value)
+                            refinement_provider, refinement_model, refinement_api_key, refinement_temperature = self._resolve_stage_llm("refinement", llm_overrides)
+                            refined_test.modules[idx - 1].source_html = getattr(extracted_test.modules[idx - 1], "source_html", None)
+                            refined_test.modules[idx - 1].extracted_data = extracted_elements
+                            refined_elements = await RefinementStage(self.llm_provider, self.prompt_manager).execute(
+                                None,
+                                extracted_test.modules[idx - 1],
+                                refinement_api_key,
+                                refinement_model,
+                                refinement_provider,
+                                temperature=refinement_temperature,
+                                headless=headless,
+                                prompt_override=prompt_overrides.get("refinement"),
+                            )
+                            refined_test.modules[idx - 1].extracted_data = refined_elements
+                            refined_test.modules[idx - 1] = _map_extracted_data_to_steps(refined_test.modules[idx - 1])
+                            self.push_event(
+                                "REFINEMENT_DONE",
+                                "refinement",
+                                {
+                                    "index": idx,
+                                    "total": len(structured.modules),
+                                    "module": module.url,
+                                    "elements_count": len(refined_elements),
+                                    "elements": _model_dump_list(refined_elements),
+                                    "refined_snapshot": _sanitize_module_tree(refined_test),
+                                },
+                                pipeline_id,
+                            )
+                        break
+                    except Exception as exc:
+                        crawler_retry_errors.append(str(exc))
+                        if crawler_attempt == 0 and _is_crawl4ai_browser_lifecycle_error(exc):
+                            self.log(
+                                "Crawler lifecycle error detected. Recreating browser and retrying extraction once.",
+                                level="warning",
+                                stage="extraction",
+                            )
+                            continue
+                        raise
+                    finally:
+                        try:
+                            await crawler.close()
+                        except Exception:
+                            pass
+
+                if crawler_retry_errors:
+                    self.push_event("DEBUG", "logs", {"crawler_retry_errors": crawler_retry_errors[-2:]}, pipeline_id)
 
                 self._set_session_state(pipeline_id, PipelineStage.GENERATION.value)
                 self.push_event("STAGE_START", "generation", {"stage": PipelineStage.GENERATION.value}, pipeline_id)
@@ -1310,7 +1369,7 @@ class GenIAOrchestrator:
                     generation_model,
                     generation_provider,
                     temperature=generation_temperature,
-                    prompt_override=(prompt_overrides or {}).get("generation"),
+                    prompt_override=prompt_overrides.get("generation"),
                 )
                 self.push_event(
                     "STAGE_DONE",
@@ -1329,19 +1388,9 @@ class GenIAOrchestrator:
                     validation_model,
                     validation_provider,
                     temperature=validation_temperature,
-                    prompt_override=(prompt_overrides or {}).get("validation"),
+                    prompt_override=prompt_overrides.get("validation"),
                 )
-                self.push_event(
-                    "STAGE_DONE",
-                    "validation",
-                    {
-                        "validation": validation,
-                        "detected_inputs": validation.get("detected_inputs", []),
-                        "editable_fields": validation.get("editable_fields", []),
-                        "generated_script": script,
-                    },
-                    pipeline_id,
-                )
+                self.push_event("STAGE_DONE", "validation", {"validation": validation, "generated_script": script}, pipeline_id)
 
                 session["data"].update(
                     {
@@ -1354,15 +1403,15 @@ class GenIAOrchestrator:
                         "input_mode": input_mode,
                         "user_story_content": user_story_content,
                         "user_story_filename": user_story_filename,
-                        "manual_urls": manual_urls or [],
+                        "manual_urls": manual_urls,
                         "framework": framework,
                         "language": language,
                         "test_name": test_name,
                         "headless": headless,
                         "attempt": attempt,
                         "pipeline_id": pipeline_id,
-                        "prompt_overrides": prompt_overrides or {},
-                        "llm_overrides": llm_overrides or {},
+                        "prompt_overrides": prompt_overrides,
+                        "llm_overrides": llm_overrides,
                     }
                 )
                 session["state"] = "WAITING_VALIDATION"
@@ -1371,12 +1420,10 @@ class GenIAOrchestrator:
                 self.push_event(
                     "PIPELINE_PAUSED",
                     "logs",
-                    {
-                        "pipeline_id": pipeline_id,
-                        "paused_at": PipelineStage.VALIDATION.value,
-                    },
+                    {"pipeline_id": pipeline_id, "paused_at": PipelineStage.VALIDATION.value},
                     pipeline_id,
                 )
+                session["queue"].put(None)
 
                 return {
                     "status": "waiting_validation",
@@ -1389,7 +1436,7 @@ class GenIAOrchestrator:
                     "variables": validation.get("detected_inputs", []),
                     "editable_fields": validation.get("editable_fields", []),
                     "logs": self.execution_logs,
-                    "llm_overrides": llm_overrides or {},
+                    "llm_overrides": llm_overrides,
                 }
             except Exception as exc:
                 self.push_event("PIPELINE_ERROR", "logs", {"error": str(exc), "traceback": traceback.format_exc()}, pipeline_id)
@@ -1400,6 +1447,284 @@ class GenIAOrchestrator:
                     session["paused_at"] = "ERROR"
                     session["queue"].put(None)
                 return {"status": "error", "error": str(exc), "pipeline_id": pipeline_id, "logs": self.execution_logs}
+
+    # async def run_full_pipeline_1(
+    #     self,
+    #     test_case: str,
+    #     framework: str,
+    #     language: str,
+    #     test_name: str | None = None,
+    #     headless: bool = True,
+    #     attempt: int = 1,
+    #     pipeline_id: str | None = None,
+    #     prompt_overrides: Dict[str, str] | None = None,
+    #     llm_overrides: Dict[str, Any] | None = None,
+    #     input_mode: str = "test_case",
+    #     user_story_content: str | None = None,
+    #     user_story_filename: str | None = None,
+    #     manual_urls: list[str] | None = None,
+    # ) -> Dict[str, Any]:
+    #     with self._pipeline_lock:
+    #         self.execution_logs = []
+    #         start_time = datetime.now()
+    #         pipeline_id = pipeline_id or str(uuid.uuid4())
+
+    #         try:
+    #             _require_crawl4ai()
+    #             session = self._create_session(
+    #                 pipeline_id,
+    #                 initial_input=test_case,
+    #                 input_mode=input_mode,
+    #                 user_story_content=user_story_content,
+    #                 user_story_filename=user_story_filename,
+    #                 manual_urls=manual_urls or [],
+    #                 framework=framework,
+    #                 language=language,
+    #                 test_name=test_name,
+    #                 headless=headless,
+    #                 attempt=attempt,
+    #                 prompt_overrides=prompt_overrides or {},
+    #                 llm_overrides=llm_overrides or {},
+    #             )
+
+    #             self.push_event(
+    #                 "PIPELINE_START",
+    #                 "logs",
+    #                 {
+    #                     "pipeline_id": pipeline_id,
+    #                     "test_name": test_name,
+    #                     "framework": framework,
+    #                     "language": language,
+    #                     "attempt": attempt,
+    #                     "timestamp": start_time.isoformat(),
+    #                 },
+    #                 pipeline_id,
+    #             )
+
+    #             self._set_session_state(pipeline_id, PipelineStage.STRUCTURING.value)
+    #             self.push_event("STAGE_START", "structuring", {"stage": PipelineStage.STRUCTURING.value}, pipeline_id)
+    #             struct_provider, struct_model, struct_api_key, struct_temperature = self._resolve_stage_llm("structuring", llm_overrides)
+    #             structured = await StructuringStage(self.llm_provider, self.prompt_manager).execute(
+    #                 test_case,
+    #                 struct_api_key,
+    #                 struct_model,
+    #                 struct_provider,
+    #                 temperature=struct_temperature,
+    #                 input_mode=input_mode,
+    #                 user_story_content=user_story_content,
+    #                 user_story_filename=user_story_filename,
+    #                 manual_urls=manual_urls or [],
+    #                 prompt_override=(prompt_overrides or {}).get("structuring"),
+    #             )
+    #             self.push_event(
+    #                 "STAGE_DONE",
+    #                 "structuring",
+    #                 {
+    #                     "test_case": structured.testCase,
+    #                     "modules": len(structured.modules),
+    #                     "structured": structured.model_dump(),
+    #                 },
+    #                 pipeline_id,
+    #             )
+
+    #             browser_config = _create_browser_config(headless)
+    #             crawler_retry_errors: list[str] = []
+    #             for crawler_attempt in range(2):
+    #                 extracted_test = structured.model_copy(deep=True)
+    #                 refined_test = structured.model_copy(deep=True)
+    #                 crawler = AsyncWebCrawler(config=browser_config, thread_safe=True)
+    #                 try:
+    #                     await crawler.start()
+    #                     for idx, module in enumerate(structured.modules, 1):
+    #                         module_start = datetime.now()
+    #                         self._set_session_state(pipeline_id, PipelineStage.EXTRACTION.value)
+    #                         self.push_event(
+    #                             "MODULE_START",
+    #                             "extraction",
+    #                             {"index": idx, "total": len(structured.modules), "url": module.url},
+    #                             pipeline_id,
+    #                         )
+
+    #                         extraction_provider, extraction_model, extraction_api_key, extraction_temperature = self._resolve_stage_llm("extraction", llm_overrides)
+    #                         extracted_elements = await ExtractionStage(self.llm_provider, self.prompt_manager).execute(
+    #                             crawler,
+    #                             module,
+    #                             extraction_api_key,
+    #                             extraction_model,
+    #                             extraction_provider,
+    #                             temperature=extraction_temperature,
+    #                             headless=headless,
+    #                             prompt_override=(prompt_overrides or {}).get("extraction"),
+    #                         )
+    #                         extracted_test.modules[idx - 1].source_html = getattr(module, "source_html", None)
+    #                         extracted_test.modules[idx - 1].extracted_data = extracted_elements
+    #                         extracted_test.modules[idx - 1] = _map_extracted_data_to_steps(extracted_test.modules[idx - 1])
+    #                         self.push_event(
+    #                             "EXTRACTION_DONE",
+    #                             "extraction",
+    #                             {
+    #                                 "index": idx,
+    #                                 "total": len(structured.modules),
+    #                                 "module": module.url,
+    #                                 "elements_count": len(extracted_elements),
+    #                                 "elements": _model_dump_list(extracted_elements),
+    #                                 "extracted_snapshot": _sanitize_module_tree(extracted_test),
+    #                                 "duration_ms": (datetime.now() - module_start).total_seconds() * 1000,
+    #                             },
+    #                             pipeline_id,
+    #                         )
+
+    #                         self._set_session_state(pipeline_id, PipelineStage.REFINEMENT.value)
+    #                         refinement_provider, refinement_model, refinement_api_key, refinement_temperature = self._resolve_stage_llm("refinement", llm_overrides)
+    #                         refined_test.modules[idx - 1].source_html = getattr(extracted_test.modules[idx - 1], "source_html", None)
+    #                         refined_test.modules[idx - 1].extracted_data = extracted_elements
+    #                         refined_elements = await RefinementStage(self.llm_provider, self.prompt_manager).execute(
+    #                             None,
+    #                             extracted_test.modules[idx - 1],
+    #                             refinement_api_key,
+    #                             refinement_model,
+    #                             refinement_provider,
+    #                             temperature=refinement_temperature,
+    #                             headless=headless,
+    #                             prompt_override=(prompt_overrides or {}).get("refinement"),
+    #                         )
+    #                         refined_test.modules[idx - 1].extracted_data = refined_elements
+    #                         refined_test.modules[idx - 1] = _map_extracted_data_to_steps(refined_test.modules[idx - 1])
+    #                         self.push_event(
+    #                             "REFINEMENT_DONE",
+    #                             "refinement",
+    #                             {
+    #                                 "index": idx,
+    #                                 "total": len(structured.modules),
+    #                                 "module": module.url,
+    #                                 "elements_count": len(refined_elements),
+    #                                 "elements": _model_dump_list(refined_elements),
+    #                                 "refined_snapshot": _sanitize_module_tree(refined_test),
+    #                             },
+    #                             pipeline_id,
+    #                         )
+    #                     break
+    #                 except Exception as exc:
+    #                     crawler_retry_errors.append(str(exc))
+    #                     if crawler_attempt == 0 and _is_crawl4ai_browser_lifecycle_error(exc):
+    #                         self.log("Crawler lifecycle error detected. Recreating browser and retrying extraction once.", level="warning", stage="extraction")
+    #                         continue
+    #                     raise
+    #                 finally:
+    #                     try:
+    #                         await crawler.close()
+    #                     except Exception:
+    #                         pass
+    #             if crawler_retry_errors:
+    #                 self.push_event(
+    #                     "DEBUG",
+    #                     "logs",
+    #                     {"crawler_retry_errors": crawler_retry_errors[-2:]},
+    #                     pipeline_id,
+    #                 )
+
+    #             self._set_session_state(pipeline_id, PipelineStage.GENERATION.value)
+    #             self.push_event("STAGE_START", "generation", {"stage": PipelineStage.GENERATION.value}, pipeline_id)
+    #             generation_provider, generation_model, generation_api_key, generation_temperature = self._resolve_stage_llm("generation", llm_overrides)
+    #             script = await GenerationStage(self.llm_provider, self.prompt_manager).execute(
+    #                 refined_test,
+    #                 framework,
+    #                 language,
+    #                 generation_api_key,
+    #                 generation_model,
+    #                 generation_provider,
+    #                 temperature=generation_temperature,
+    #                 prompt_override=(prompt_overrides or {}).get("generation"),
+    #             )
+    #             self.push_event(
+    #                 "STAGE_DONE",
+    #                 "generation",
+    #                 {"script_length": len(script), "script_preview": script[:500], "script": script},
+    #                 pipeline_id,
+    #             )
+
+    #             self._set_session_state(pipeline_id, PipelineStage.VALIDATION.value)
+    #             self.push_event("STAGE_START", "validation", {"stage": PipelineStage.VALIDATION.value}, pipeline_id)
+    #             validation_provider, validation_model, validation_api_key, validation_temperature = self._resolve_stage_llm("validation", llm_overrides)
+    #             validation = await ValidationStage(self.llm_provider, self.prompt_manager).execute(
+    #                 script,
+    #                 refined_test,
+    #                 validation_api_key,
+    #                 validation_model,
+    #                 validation_provider,
+    #                 temperature=validation_temperature,
+    #                 prompt_override=(prompt_overrides or {}).get("validation"),
+    #             )
+    #             self.push_event(
+    #                 "STAGE_DONE",
+    #                 "validation",
+    #                 {
+    #                     "validation": validation,
+    #                     "detected_inputs": validation.get("detected_inputs", []),
+    #                     "editable_fields": validation.get("editable_fields", []),
+    #                     "generated_script": script,
+    #                 },
+    #                 pipeline_id,
+    #             )
+
+    #             session["data"].update(
+    #                 {
+    #                     "structured": structured.model_dump(),
+    #                     "extracted": _sanitize_module_tree(extracted_test),
+    #                     "refined": _sanitize_module_tree(refined_test),
+    #                     "script": script,
+    #                     "validation": validation,
+    #                     "test_case": test_case,
+    #                     "input_mode": input_mode,
+    #                     "user_story_content": user_story_content,
+    #                     "user_story_filename": user_story_filename,
+    #                     "manual_urls": manual_urls or [],
+    #                     "framework": framework,
+    #                     "language": language,
+    #                     "test_name": test_name,
+    #                     "headless": headless,
+    #                     "attempt": attempt,
+    #                     "pipeline_id": pipeline_id,
+    #                     "prompt_overrides": prompt_overrides or {},
+    #                     "llm_overrides": llm_overrides or {},
+    #                 }
+    #             )
+    #             session["state"] = "WAITING_VALIDATION"
+    #             session["paused_at"] = PipelineStage.VALIDATION.value
+    #             session["updated_at"] = _iso_now()
+    #             self.push_event(
+    #                 "PIPELINE_PAUSED",
+    #                 "logs",
+    #                 {
+    #                     "pipeline_id": pipeline_id,
+    #                     "paused_at": PipelineStage.VALIDATION.value,
+    #                 },
+    #                 pipeline_id,
+    #             )
+
+    #             return {
+    #                 "status": "waiting_validation",
+    #                 "pipeline_id": pipeline_id,
+    #                 "structured": structured.model_dump(),
+    #                 "extracted": _sanitize_module_tree(extracted_test),
+    #                 "refined": _sanitize_module_tree(refined_test),
+    #                 "script": script,
+    #                 "validation": validation,
+    #                 "variables": validation.get("detected_inputs", []),
+    #                 "editable_fields": validation.get("editable_fields", []),
+    #                 "logs": self.execution_logs,
+    #                 "llm_overrides": llm_overrides or {},
+    #             }
+    #         except Exception as exc:
+    #             self.push_event("PIPELINE_ERROR", "logs", {"error": str(exc), "traceback": traceback.format_exc()}, pipeline_id)
+    #             session = self._get_session(pipeline_id)
+    #             if session:
+    #                 session["state"] = "ERROR"
+    #                 session["data"]["error"] = str(exc)
+    #                 session["paused_at"] = "ERROR"
+    #                 session["queue"].put(None)
+    #             return {"status": "error", "error": str(exc), "pipeline_id": pipeline_id, "logs": self.execution_logs}
+    
 
     async def run_full_pipeline_2(
         self,
