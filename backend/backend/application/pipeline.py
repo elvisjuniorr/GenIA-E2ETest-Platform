@@ -262,7 +262,6 @@ def _is_crawl4ai_browser_lifecycle_error(exc: Exception) -> bool:
     return any(
         marker in text
         for marker in (
-            "browsertype.launch",
             "target page, context or browser has been closed",
             "browser has been closed",
             "browser closed",
@@ -1341,6 +1340,13 @@ class GenIAOrchestrator:
                         break
                     except Exception as exc:
                         crawler_retry_errors.append(str(exc))
+                        exc_text = str(exc).lower()
+                        if "browsertype.launch" in exc_text:
+                            self.log(
+                                "Crawl4AI browser launch failed. Verify the Render runtime, browser binaries, and Docker image.",
+                                level="error",
+                                stage="extraction",
+                            )
                         if crawler_attempt == 0 and _is_crawl4ai_browser_lifecycle_error(exc):
                             self.log(
                                 "Crawler lifecycle error detected. Recreating browser and retrying extraction once.",
