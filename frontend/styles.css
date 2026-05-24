@@ -929,6 +929,11 @@ label {
     margin-top: 1rem;
 }
 
+.code-actions > button {
+    width: 35%;
+    height: -webkit-fill-available;
+}
+
 .step-row {
   display: flex;
   gap: 8px;
@@ -2281,7 +2286,7 @@ label {
   }
 
   .main-content {
-    padding: 18px 14px calc(112px + env(safe-area-inset-bottom));
+    padding: 18px 14px calc(2rem + env(safe-area-inset-bottom));
     height: calc(100dvh - 0px);
   }
 
@@ -2314,9 +2319,18 @@ label {
     grid-template-columns: 1fr;
   }
 
+  .sidebar-user {
+      padding: 8px 10px;
+      margin-bottom: 10px;
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+  }
+
   .sidebar-brand,
   .sidebar-user .label {
     font-size: 0.68rem;
+    margin-bottom: 0rem;
   }
 
   .sidebar-user {
