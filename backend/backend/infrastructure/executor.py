@@ -191,31 +191,47 @@ class TestExecutor:
     def _normalize_robot_script(self, script: str) -> str:
         normalized = script
 
+        bootstrap_keyword = dedent(
+            """
+
+            Open Headless Browser
+                [Documentation]    Open Chrome in a Render-friendly headless configuration.
+                ${chrome_options}=    Evaluate    sys.modules['selenium.webdriver'].ChromeOptions()    sys, selenium
+                Call Method    ${chrome_options}    add_argument    --headless=new
+                Call Method    ${chrome_options}    add_argument    --no-sandbox
+                Call Method    ${chrome_options}    add_argument    --disable-dev-shm-usage
+                Call Method    ${chrome_options}    add_argument    --window-size=1920,1080
+                ${chrome_binary}=    Evaluate    __import__('os').environ.get('CHROME_BIN', '')
+                IF    '${chrome_binary}' != ''
+                    Evaluate    setattr($chrome_options, 'binary_location', $chrome_binary)
+                END
+                Open Browser    about:blank    Chrome    options=${chrome_options}
+            """
+        ).strip()
+
         normalized = re.sub(
-            r"(?m)^(Suite Setup\s+)Create Webdriver\b.*$",
+            r"(?m)^(Suite Setup\s+)(?:Create Webdriver\b.*|Open Browser\b.*|Open Headless Browser\b.*)$",
             r"\1Open Headless Browser",
             normalized,
         )
 
-        if "*** Keywords ***" in normalized and "Open Headless Browser" not in normalized:
-            safe_keyword = dedent(
-                """
+        normalized = re.sub(
+            r"(?s)\nOpen Headless Browser\s*\n.*?(?=\n[A-Z][^\n]*\n|\Z)",
+            "",
+            normalized,
+            count=1,
+        )
+        normalized = re.sub(
+            r"(?s)\nCreate Webdriver\s*\n.*?(?=\n[A-Z][^\n]*\n|\Z)",
+            "",
+            normalized,
+            count=1,
+        )
 
-                Open Headless Browser
-                    [Documentation]    Open Chrome in a Render-friendly headless configuration.
-                    ${chrome_options}=    Evaluate    sys.modules['selenium.webdriver'].ChromeOptions()    sys, selenium
-                    Call Method    ${chrome_options}    add_argument    --headless=new
-                    Call Method    ${chrome_options}    add_argument    --no-sandbox
-                    Call Method    ${chrome_options}    add_argument    --disable-dev-shm-usage
-                    Call Method    ${chrome_options}    add_argument    --window-size=1920,1080
-                    ${chrome_binary}=    Get Environment Variable    CHROME_BIN    default=${EMPTY}
-                    IF    '${chrome_binary}' != ''
-                        Call Method    ${chrome_options}    binary_location    ${chrome_binary}
-                    END
-                    Open Browser    about:blank    Chrome    options=${chrome_options}
-                """
-            ).strip()
-            normalized = f"{normalized.rstrip()}\n{safe_keyword}\n"
+        if "*** Keywords ***" not in normalized:
+            normalized = f"{normalized.rstrip()}\n\n*** Keywords ***\n"
+
+        normalized = normalized.rstrip() + "\n\n" + bootstrap_keyword + "\n"
 
         return normalized
 
