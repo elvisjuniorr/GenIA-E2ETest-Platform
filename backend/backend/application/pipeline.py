@@ -238,9 +238,10 @@ def _require_crawl4ai() -> None:
     if BrowserConfig is not None:
         try:
             BrowserConfig.set_defaults(
-                # cache_cdp_connection=True,
-                # cdp_close_delay=0,
-                # create_isolated_context=True,
+                browser_mode="dedicated",
+                cache_cdp_connection=True,
+                cdp_close_delay=0,
+                create_isolated_context=True,
             )
         except Exception:
             pass
@@ -249,11 +250,12 @@ def _require_crawl4ai() -> None:
 def _create_browser_config(headless: bool) -> Any:
     return BrowserConfig(
         browser_type="chromium",
+        browser_mode="dedicated",
         headless=headless,
         verbose=True,
-        # cache_cdp_connection=True,
-        # cdp_close_delay=0,
-        # create_isolated_context=True,
+        cache_cdp_connection=True,
+        cdp_close_delay=0,
+        create_isolated_context=True,
     )
 
 
@@ -1013,7 +1015,7 @@ class GenIAOrchestrator:
     ) -> List[ExtractedElement]:
         _require_crawl4ai()
         browser_config = _create_browser_config(headless)
-        crawler = AsyncWebCrawler(config=browser_config, thread_safe=True)
+        crawler = AsyncWebCrawler(config=browser_config)
         try:
             await crawler.start()
             return await ExtractionStage(self.llm_provider, self.prompt_manager).execute(
@@ -1266,7 +1268,7 @@ class GenIAOrchestrator:
                 crawler_retry_errors: list[str] = []
 
                 for crawler_attempt in range(2):
-                    crawler = AsyncWebCrawler(config=browser_config, thread_safe=True)
+                    crawler = AsyncWebCrawler(config=browser_config)
                     try:
                         await crawler.start()
                         for idx, module in enumerate(structured.modules, 1):
