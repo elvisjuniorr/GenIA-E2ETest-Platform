@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import glob
+import re
 import shutil
 import subprocess
 import tempfile
@@ -187,6 +188,37 @@ class TestExecutor:
                 return candidate
         return None
 
+    def _normalize_robot_script(self, script: str) -> str:
+        normalized = script
+
+        normalized = re.sub(
+            r"(?m)^(Suite Setup\s+)Create Webdriver\b.*$",
+            r"\1Open Headless Browser",
+            normalized,
+        )
+
+        if "*** Keywords ***" in normalized and "Open Headless Browser" not in normalized:
+            safe_keyword = dedent(
+                """
+
+                Open Headless Browser
+                    [Documentation]    Open Chrome in a Render-friendly headless configuration.
+                    ${chrome_options}=    Evaluate    sys.modules['selenium.webdriver'].ChromeOptions()    sys, selenium
+                    Call Method    ${chrome_options}    add_argument    --headless=new
+                    Call Method    ${chrome_options}    add_argument    --no-sandbox
+                    Call Method    ${chrome_options}    add_argument    --disable-dev-shm-usage
+                    Call Method    ${chrome_options}    add_argument    --window-size=1920,1080
+                    ${chrome_binary}=    Get Environment Variable    CHROME_BIN    default=${EMPTY}
+                    IF    '${chrome_binary}' != ''
+                        Call Method    ${chrome_options}    binary_location    ${chrome_binary}
+                    END
+                    Open Browser    about:blank    Chrome    options=${chrome_options}
+                """
+            ).strip()
+            normalized = f"{normalized.rstrip()}\n{safe_keyword}\n"
+
+        return normalized
+
     def execute(
         self,
         framework: str,
@@ -200,6 +232,8 @@ class TestExecutor:
 
         try:
             filename = self._determine_filename(framework, script, language)
+            if framework.lower() == "robotframework":
+                script = self._normalize_robot_script(script)
             file_path = self._write_file(temp_dir, filename, script)
             execution_log_lines.append(f"[SETUP] Workspace: {temp_dir}")
             execution_log_lines.append(f"[SETUP] Script file: {file_path}")
