@@ -209,12 +209,18 @@ class TestExecutor:
             execution_log_lines.append(f"[EXECUTION] Command: {' '.join(command)}")
             self._emit(log_callback, "info", f"Executando {' '.join(command)}")
 
+            env = os.environ.copy()
+            env.setdefault("CHROME_BIN", "/usr/bin/chromium")
+            env.setdefault("CHROMEDRIVER_BIN", "/usr/bin/chromedriver")
+            env.setdefault("DISPLAY", env.get("DISPLAY", ":99"))
+
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=temp_dir,
+                env=env,
             )
 
             stdout_text, stderr_text = self._stream_process(process, execution_log_lines, log_callback)

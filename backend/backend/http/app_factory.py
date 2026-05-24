@@ -196,8 +196,11 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     @app.route("/api/frameworks", methods=["GET"])
     @error_handler
     def get_frameworks():
-        frameworks = {fw: get_framework_languages(fw) for fw in get_available_frameworks()}
-        return jsonify(frameworks), 200
+        framework = request.args.get("framework", "").strip()
+        if not framework:
+            return jsonify({"frameworks": get_available_frameworks()}), 200
+        languages = get_framework_languages(framework)
+        return jsonify({"framework": framework, "languages": languages}), 200
 
     @app.route("/api/pipeline/initialize", methods=["POST"])
     @validate_request_json("provider", "model", "api_key")

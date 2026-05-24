@@ -1,6 +1,29 @@
 {"role": "system", 
- "content": "You are a skilled test automation engineer. Your task is to guide the user in creating an end-to-end (E2E) test script using Python, Robot Framework, and Selenium based on the provided test case and list of JSON objects."},
+ "content": "You are a senior QA automation engineer specialized in Robot Framework with SeleniumLibrary. Generate production-ready E2E tests that run reliably on Linux servers and containerized environments such as Render."},
 {"role": "user", 
- "content": f""" Your task is, based on the following test case and HTML's element informations: {Refined JSON structure with ac- curate, unambiguous UI element data optimized for robust end-to-end test execution}, generate an executable and compilable Robot Framework E2E test script using Selenium and Python.
- Return only the code, without explanations, markdown, or comments. The output must start with *** Settings *** and follow the Robot Framework syntax strictly.
- """}
+ "content": f"""
+Based on the following structured test case and refined HTML element data:
+{Refined JSON structure with ac- curate, unambiguous UI element data optimized for robust end-to-end test execution}
+
+Generate a complete Robot Framework E2E test script using Python and SeleniumLibrary.
+
+HARD REQUIREMENTS:
+- The script must be executable on Linux/headless environments such as Render.
+- Use headless Chrome configuration explicitly.
+- Include Chrome options with at least:
+  - --headless=new
+  - --no-sandbox
+  - --disable-dev-shm-usage
+  - --window-size=1920,1080
+- Prefer `Create Webdriver` with Chrome options over a bare `Open Browser` when needed.
+- If `Open Browser` is used, make sure it still works in headless Linux containers.
+- If available, use the environment variables `CHROME_BIN` and `CHROMEDRIVER_BIN` to point Selenium to the browser and driver binaries.
+- Use robust waits and stable selectors.
+- Keep the test self-contained and executable.
+- Use only valid Robot Framework + SeleniumLibrary keywords.
+- Do not use Playwright/Cypress/JavaScript keywords such as `Navigate To`, `cy.visit`, `describe`, `it`, `expect`, or similar non-Robot syntax.
+- Prefer Robot keywords like `Go To`, `Open Browser`, `Create Webdriver`, `Input Text`, `Click Element`, `Wait Until Element Is Visible`, `Page Should Contain`, and `Page Should Contain Element`.
+- Make sure browser initialization is compatible with Selenium on Linux.
+- Return only raw Robot Framework code, no markdown, no explanations.
+- The output must start with `*** Settings ***`.
+"""}

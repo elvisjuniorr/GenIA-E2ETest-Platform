@@ -22,19 +22,27 @@
         const url = `${this.baseURL}${endpoint}`;
         const options = {
           method,
-          headers: {
-            "Content-Type": "application/json",
-          },
+          mode: "cors",
+          headers: {},
         };
 
-        if (body && (method === "POST" || method === "PUT")) {
+        if (method === "GET") {
+          options.headers.Accept = "application/json";
+        }
+
+        if (body && (method === "POST" || method === "PUT" || method === "PATCH")) {
+          options.headers["Content-Type"] = "application/json";
           options.body = JSON.stringify(body);
         }
 
         const response = await fetch(url, options);
-        const data = await response.json();
+        const contentType = response.headers.get("content-type") || "";
+        const data = contentType.includes("application/json") ? await response.json() : await response.text();
 
         if (!response.ok) {
+          if (typeof data === "string") {
+            throw new Error(`${data.slice(0, 300)}${data.length > 300 ? "..." : ""}`);
+          }
           throw new Error(data.error || `HTTP ${response.status}`);
         }
 
