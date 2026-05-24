@@ -190,77 +190,15 @@ class TestExecutor:
 
     def _normalize_robot_script(self, script: str) -> str:
         normalized = script.replace("\r\n", "\n")
-
-        bootstrap_keyword = dedent(
-            """
-
-            Open Headless Browser
-                [Documentation]    Open Chrome in a Render-friendly headless configuration.
-                ${chrome_options}=    Evaluate    sys.modules['selenium.webdriver'].ChromeOptions()    sys, selenium
-                ${headless_arg}=    Set Variable    --headless=new
-                ${no_sandbox_arg}=    Set Variable    --no-sandbox
-                ${disable_dev_shm_arg}=    Set Variable    --disable-dev-shm-usage
-                ${window_size_arg}=    Set Variable    --window-size=1920,1080
-                Call Method    ${chrome_options}    add_argument    ${headless_arg}
-                Call Method    ${chrome_options}    add_argument    ${no_sandbox_arg}
-                Call Method    ${chrome_options}    add_argument    ${disable_dev_shm_arg}
-                Call Method    ${chrome_options}    add_argument    ${window_size_arg}
-                ${chrome_binary}=    Evaluate    __import__('os').environ.get('CHROME_BIN', '')
-                IF    '${chrome_binary}' != ''
-                    Evaluate    setattr($chrome_options, 'binary_location', $chrome_binary)
-                END
-                Open Browser    about:blank    Chrome    options=${chrome_options}
-            """
-        ).strip("\n")
-
-        lines = normalized.split("\n")
-        suite_setup_index = None
-        for idx, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped.startswith("Suite Setup"):
-                suite_setup_index = idx
-                break
-
-        if suite_setup_index is not None:
-            lines[suite_setup_index] = re.sub(
-                r"^(Suite Setup\s+)(?:Create Webdriver\b.*|Open Browser\b.*|Open Headless Browser\b.*)$",
-                r"\1Open Headless Browser",
-                lines[suite_setup_index].strip(),
-            )
-
-        normalized = "\n".join(lines)
-
-        # Remove only an existing helper keyword block, preserving all test cases and other sections.
-        keyword_block_pattern = re.compile(
-            r"(?ms)^Open Headless Browser\s*\n(?:^[ \t].*\n?)*?(?=^(?:\*\*\* |\S)|\Z)"
+        normalized = re.sub(
+            r"(?m)^(\s*Run Keyword If\s+'\\$\\{chrome_bin\\}' != ''\s+Set Suite Variable\s+)\$\{chrome_options\.binary_location\}\s+\$\{chrome_bin\}\s*$",
+            r"\1Evaluate    setattr($chrome_options, 'binary_location', $chrome_bin)",
+            normalized,
         )
-        normalized = keyword_block_pattern.sub("", normalized)
-
-        create_webdriver_pattern = re.compile(
-            r"(?ms)^Create Webdriver\s*\n(?:^[ \t].*\n?)*?(?=^(?:\*\*\* |\S)|\Z)"
-        )
-        normalized = create_webdriver_pattern.sub("", normalized)
-
-        if "*** Keywords ***" not in normalized:
-            normalized = f"{normalized.rstrip()}\n\n*** Keywords ***\n"
-
-        normalized = normalized.rstrip() + "\n\n" + bootstrap_keyword + "\n"
-
-        normalized = normalized.replace(
-            "Call Method    ${chrome_options}    add_argument    --headless=new",
-            "${headless_arg}=    Set Variable    --headless=new\n                Call Method    ${chrome_options}    add_argument    ${headless_arg}",
-        )
-        normalized = normalized.replace(
-            "Call Method    ${chrome_options}    add_argument    --no-sandbox",
-            "${no_sandbox_arg}=    Set Variable    --no-sandbox\n                Call Method    ${chrome_options}    add_argument    ${no_sandbox_arg}",
-        )
-        normalized = normalized.replace(
-            "Call Method    ${chrome_options}    add_argument    --disable-dev-shm-usage",
-            "${disable_dev_shm_arg}=    Set Variable    --disable-dev-shm-usage\n                Call Method    ${chrome_options}    add_argument    ${disable_dev_shm_arg}",
-        )
-        normalized = normalized.replace(
-            "Call Method    ${chrome_options}    add_argument    --window-size=1920,1080",
-            "${window_size_arg}=    Set Variable    --window-size=1920,1080\n                Call Method    ${chrome_options}    add_argument    ${window_size_arg}",
+        normalized = re.sub(
+            r"(?m)^(\s*Set Suite Variable\s+)\$\{chrome_options\.binary_location\}\s+\$\{chrome_bin\}\s*$",
+            r"\1Evaluate    setattr($chrome_options, 'binary_location', $chrome_bin)",
+            normalized,
         )
 
         return normalized

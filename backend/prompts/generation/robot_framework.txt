@@ -21,7 +21,7 @@ HARD REQUIREMENTS:
   - --no-sandbox
   - --disable-dev-shm-usage
   - --window-size=1920,1080
-- If available, use the environment variable `CHROME_BIN` to set the browser binary location on the ChromeOptions object.
+- If available, use the environment variable `CHROME_BIN` to set the browser binary location on the ChromeOptions object with `Evaluate    setattr($chrome_options, 'binary_location', $chrome_bin)`.
 - Do not use a custom helper keyword named `Create Webdriver`.
 - Do not use the deprecated old Robot Framework `:FOR` loop syntax.
 - If a loop is needed, use only the modern `FOR    ...    END` syntax.
