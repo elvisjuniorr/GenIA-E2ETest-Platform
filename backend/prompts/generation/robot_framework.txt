@@ -24,6 +24,10 @@ HARD REQUIREMENTS:
 - Do not use Playwright/Cypress/JavaScript keywords such as `Navigate To`, `cy.visit`, `describe`, `it`, `expect`, or similar non-Robot syntax.
 - Prefer Robot keywords like `Go To`, `Open Browser`, `Create Webdriver`, `Input Text`, `Click Element`, `Wait Until Element Is Visible`, `Page Should Contain`, and `Page Should Contain Element`.
 - Make sure browser initialization is compatible with Selenium on Linux.
+- Do not use the deprecated old Robot Framework `:FOR` loop syntax.
+- If a loop is needed, use only the modern `FOR    ...    END` syntax.
+- Prefer a simple suite setup with direct SeleniumLibrary usage rather than custom helper keywords.
+- Never generate raw backslashes inside JSON strings; when returning code in JSON, all backslashes must be escaped correctly.
 - Return only raw Robot Framework code, no markdown, no explanations.
 - The output must start with `*** Settings ***`.
 """}

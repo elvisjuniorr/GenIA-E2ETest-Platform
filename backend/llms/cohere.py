@@ -14,7 +14,40 @@ def parse_json_output(text):
     if match:
         text = match.group(1).strip()
 
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        text = _escape_invalid_json_backslashes(text)
+        return json.loads(text)
+
+
+def _escape_invalid_json_backslashes(text: str) -> str:
+    result = []
+    in_string = False
+    escaped = False
+    valid_escapes = {'"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u'}
+
+    for index, char in enumerate(text):
+        if escaped:
+            result.append(char)
+            escaped = False
+            continue
+
+        if char == '\\' and in_string:
+            next_char = text[index + 1] if index + 1 < len(text) else ''
+            if next_char not in valid_escapes:
+                result.append('\\\\')
+                continue
+            escaped = True
+            result.append(char)
+            continue
+
+        if char == '"' and not escaped:
+            in_string = not in_string
+
+        result.append(char)
+
+    return "".join(result)
 
 class CohereProvider:
 
