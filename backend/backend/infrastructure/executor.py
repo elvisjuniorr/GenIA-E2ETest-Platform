@@ -189,7 +189,7 @@ class TestExecutor:
         return None
 
     def _normalize_robot_script(self, script: str) -> str:
-        normalized = script
+        normalized = script.replace("\r\n", "\n")
 
         bootstrap_keyword = dedent(
             """
@@ -207,26 +207,35 @@ class TestExecutor:
                 END
                 Open Browser    about:blank    Chrome    options=${chrome_options}
             """
-        ).strip()
+        ).strip("\n")
 
-        normalized = re.sub(
-            r"(?m)^(Suite Setup\s+)(?:Create Webdriver\b.*|Open Browser\b.*|Open Headless Browser\b.*)$",
-            r"\1Open Headless Browser",
-            normalized,
-        )
+        lines = normalized.split("\n")
+        suite_setup_index = None
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("Suite Setup"):
+                suite_setup_index = idx
+                break
 
-        normalized = re.sub(
-            r"(?s)\nOpen Headless Browser\s*\n.*?(?=\n[A-Z][^\n]*\n|\Z)",
-            "",
-            normalized,
-            count=1,
+        if suite_setup_index is not None:
+            lines[suite_setup_index] = re.sub(
+                r"^(Suite Setup\s+)(?:Create Webdriver\b.*|Open Browser\b.*|Open Headless Browser\b.*)$",
+                r"\1Open Headless Browser",
+                lines[suite_setup_index].strip(),
+            )
+
+        normalized = "\n".join(lines)
+
+        # Remove only an existing helper keyword block, preserving all test cases and other sections.
+        keyword_block_pattern = re.compile(
+            r"(?ms)^Open Headless Browser\s*\n(?:^[ \t].*\n?)*?(?=^(?:\*\*\* |\S)|\Z)"
         )
-        normalized = re.sub(
-            r"(?s)\nCreate Webdriver\s*\n.*?(?=\n[A-Z][^\n]*\n|\Z)",
-            "",
-            normalized,
-            count=1,
+        normalized = keyword_block_pattern.sub("", normalized)
+
+        create_webdriver_pattern = re.compile(
+            r"(?ms)^Create Webdriver\s*\n(?:^[ \t].*\n?)*?(?=^(?:\*\*\* |\S)|\Z)"
         )
+        normalized = create_webdriver_pattern.sub("", normalized)
 
         if "*** Keywords ***" not in normalized:
             normalized = f"{normalized.rstrip()}\n\n*** Keywords ***\n"
