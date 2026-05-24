@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import glob
 import shutil
 import subprocess
 import tempfile
@@ -174,6 +175,18 @@ class TestExecutor:
         Path(listener_path).write_text(listener_source, encoding="utf-8")
         return listener_path
 
+    def _discover_chrome_binary(self) -> str | None:
+        candidates = []
+        candidates.extend(glob.glob("/ms-playwright/chromium-*/chrome-linux64/chrome"))
+        candidates.extend(glob.glob("/ms-playwright/chromium-*/chrome-linux/chrome"))
+        candidates.extend(glob.glob("/usr/bin/google-chrome"))
+        candidates.extend(glob.glob("/usr/bin/chromium"))
+        candidates.extend(glob.glob("/usr/bin/chromium-browser"))
+        for candidate in candidates:
+            if candidate and os.path.exists(candidate):
+                return candidate
+        return None
+
     def execute(
         self,
         framework: str,
@@ -210,9 +223,10 @@ class TestExecutor:
             self._emit(log_callback, "info", f"Executando {' '.join(command)}")
 
             env = os.environ.copy()
-            env.setdefault("CHROME_BIN", "/usr/bin/chromium")
-            env.setdefault("CHROMEDRIVER_BIN", "/usr/bin/chromedriver")
             env.setdefault("DISPLAY", env.get("DISPLAY", ":99"))
+            chrome_binary = self._discover_chrome_binary()
+            if chrome_binary:
+                env.setdefault("CHROME_BIN", chrome_binary)
 
             process = subprocess.Popen(
                 command,

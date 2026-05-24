@@ -24,7 +24,5 @@ libpangocairo-1.0-0
 libxshmfence1
 xauth
 xvfb
-chromium
-chromium-driver
 fonts-liberation
 ca-certificates
