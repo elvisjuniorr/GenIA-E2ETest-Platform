@@ -191,6 +191,11 @@ class TestExecutor:
     def _normalize_robot_script(self, script: str) -> str:
         normalized = script.replace("\r\n", "\n")
         normalized = re.sub(
+            r"(?m)^(\s*\$\{chrome_bin\}\s+)\$\{CHROME_BIN\}\s*$",
+            r"\1%{CHROME_BIN}",
+            normalized,
+        )
+        normalized = re.sub(
             r"(?m)^(\s*Run Keyword If\s+'\\$\\{chrome_bin\\}' != ''\s+Set Suite Variable\s+)\$\{chrome_options\.binary_location\}\s+\$\{chrome_bin\}\s*$",
             r"\1Evaluate    setattr($chrome_options, 'binary_location', $chrome_bin)",
             normalized,
