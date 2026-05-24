@@ -13,7 +13,9 @@ HARD REQUIREMENTS:
 - Use a real ChromeOptions object. Do not pass a plain string, list, or comma-separated text to the `options=` argument.
 - If you define a browser bootstrap, define `Open Headless Browser` and call it from `Suite Setup`.
 - Inside `Open Headless Browser`, create `ChromeOptions` with `Evaluate    sys.modules['selenium.webdriver'].ChromeOptions()    sys, selenium`.
-- Add each Chrome argument with `Call Method    ${chrome_options}    add_argument    ...`.
+- Add each Chrome argument by first storing it in a Robot variable, then passing that variable to `Call Method`. Example:
+  - `${headless_arg}=    Set Variable    --headless=new`
+  - `Call Method    ${chrome_options}    add_argument    ${headless_arg}`
 - Include Chrome arguments at minimum:
   - --headless=new
   - --no-sandbox

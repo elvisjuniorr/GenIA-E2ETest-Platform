@@ -197,10 +197,14 @@ class TestExecutor:
             Open Headless Browser
                 [Documentation]    Open Chrome in a Render-friendly headless configuration.
                 ${chrome_options}=    Evaluate    sys.modules['selenium.webdriver'].ChromeOptions()    sys, selenium
-                Call Method    ${chrome_options}    add_argument    --headless=new
-                Call Method    ${chrome_options}    add_argument    --no-sandbox
-                Call Method    ${chrome_options}    add_argument    --disable-dev-shm-usage
-                Call Method    ${chrome_options}    add_argument    --window-size=1920,1080
+                ${headless_arg}=    Set Variable    --headless=new
+                ${no_sandbox_arg}=    Set Variable    --no-sandbox
+                ${disable_dev_shm_arg}=    Set Variable    --disable-dev-shm-usage
+                ${window_size_arg}=    Set Variable    --window-size=1920,1080
+                Call Method    ${chrome_options}    add_argument    ${headless_arg}
+                Call Method    ${chrome_options}    add_argument    ${no_sandbox_arg}
+                Call Method    ${chrome_options}    add_argument    ${disable_dev_shm_arg}
+                Call Method    ${chrome_options}    add_argument    ${window_size_arg}
                 ${chrome_binary}=    Evaluate    __import__('os').environ.get('CHROME_BIN', '')
                 IF    '${chrome_binary}' != ''
                     Evaluate    setattr($chrome_options, 'binary_location', $chrome_binary)
@@ -241,6 +245,23 @@ class TestExecutor:
             normalized = f"{normalized.rstrip()}\n\n*** Keywords ***\n"
 
         normalized = normalized.rstrip() + "\n\n" + bootstrap_keyword + "\n"
+
+        normalized = normalized.replace(
+            "Call Method    ${chrome_options}    add_argument    --headless=new",
+            "${headless_arg}=    Set Variable    --headless=new\n                Call Method    ${chrome_options}    add_argument    ${headless_arg}",
+        )
+        normalized = normalized.replace(
+            "Call Method    ${chrome_options}    add_argument    --no-sandbox",
+            "${no_sandbox_arg}=    Set Variable    --no-sandbox\n                Call Method    ${chrome_options}    add_argument    ${no_sandbox_arg}",
+        )
+        normalized = normalized.replace(
+            "Call Method    ${chrome_options}    add_argument    --disable-dev-shm-usage",
+            "${disable_dev_shm_arg}=    Set Variable    --disable-dev-shm-usage\n                Call Method    ${chrome_options}    add_argument    ${disable_dev_shm_arg}",
+        )
+        normalized = normalized.replace(
+            "Call Method    ${chrome_options}    add_argument    --window-size=1920,1080",
+            "${window_size_arg}=    Set Variable    --window-size=1920,1080\n                Call Method    ${chrome_options}    add_argument    ${window_size_arg}",
+        )
 
         return normalized
 
