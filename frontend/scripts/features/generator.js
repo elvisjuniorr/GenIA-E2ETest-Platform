@@ -1329,26 +1329,23 @@
       const shell = document.createElement("div");
       shell.className = "graph-shell";
       shell.innerHTML = `
+        <aside class="graph-legend">
+          <div class="legend-list">
+            <div class="legend-item"><span class="legend-swatch legend-root"></span><span>Caso de teste</span></div>
+            <div class="legend-item"><span class="legend-swatch legend-step"></span><span>Passos do fluxo</span></div>
+            <div class="legend-item"><span class="legend-swatch legend-detail"></span><span>Elementos extraídos</span></div>
+            <div class="legend-item"><span class="legend-swatch legend-property"></span><span>Propriedades do elemento</span></div>
+            <div class="legend-item"><span class="legend-line legend-flow"></span><span>Fluxo principal</span></div>
+            <div class="legend-item"><span class="legend-line legend-child"></span><span>Relação pai/filho</span></div>
+          </div>
+        </aside>
         <div class="graph-stage">
           <div class="graph-viewport">
-            <div class="graph-stage-header">
-              <div>
-                <p class="graph-stage-subtitle">${escapeHtml(stageLabel)}</p>
-              </div>
+            <div>
+              <p class="graph-stage-subtitle">${escapeHtml(stageLabel)}</p>
             </div>
             <svg class="graph-svg"></svg>
           </div>
-          <aside class="graph-legend">
-            <h4>Legenda</h4>
-            <div class="legend-list">
-              <div class="legend-item"><span class="legend-swatch legend-root"></span><span>Caso de teste</span></div>
-              <div class="legend-item"><span class="legend-swatch legend-step"></span><span>Passos do fluxo</span></div>
-              <div class="legend-item"><span class="legend-swatch legend-detail"></span><span>Elementos extraídos</span></div>
-              <div class="legend-item"><span class="legend-swatch legend-property"></span><span>Propriedades do elemento</span></div>
-              <div class="legend-item"><span class="legend-line legend-flow"></span><span>Fluxo principal</span></div>
-              <div class="legend-item"><span class="legend-line legend-child"></span><span>Relação pai/filho</span></div>
-            </div>
-          </aside>
         </div>
       `;
 
@@ -1678,6 +1675,104 @@
       });
 
       extraRenderer?.(safeValue, container);
+      const card = container.querySelector(".report-card");
+      if (card) {
+        const hasContent = grid.childElementCount > 0 || Boolean(renderedNarrative);
+        card.classList.toggle("report-card--empty", !hasContent);
+      }
+    };
+
+    const normalizeReportStatus = (value) => {
+      if (value === undefined || value === null || value === "") return null;
+      if (typeof value === "boolean") {
+        return value ? { label: "PASSED", state: "passed" } : { label: "FAILED", state: "failed" };
+      }
+      const text = String(value).trim().toLowerCase();
+      if (!text) return null;
+      if (["passed", "pass", "success", "succeeded", "ok", "done", "ready", "validated", "validado", "true"].includes(text)) {
+        return { label: "PASSED", state: "passed" };
+      }
+      if (["failed", "fail", "error", "rejected", "not_ready", "not ready", "false", "invalid", "not_validated", "not validated"].includes(text)) {
+        return { label: "FAILED", state: "failed" };
+      }
+      return null;
+    };
+
+    const resolveReportStatus = (stageKey, value) => {
+      if (!value || typeof value !== "object") return null;
+      const candidates = [];
+
+      if (stageKey === "execution") {
+        if (typeof value?.test_results?.exit_code === "number") {
+          return value.test_results.exit_code === 0
+            ? { label: "PASSED", state: "passed" }
+            : { label: "FAILED", state: "failed" };
+        }
+        candidates.push(
+          value.status,
+          value.result,
+          value.outcome,
+          value.test_results?.status,
+          value.test_results?.result
+        );
+      }
+
+      if (stageKey === "homologation") {
+        candidates.push(value.homologation_status, value.status, value.test_passed, value.success_rate);
+      }
+
+      if (stageKey === "finalization") {
+        candidates.push(
+          value.pipeline_status,
+          value.status,
+          value.final_result?.test_passed,
+          value.final_result?.production_readiness,
+          value.final_result?.automation_reliability
+        );
+      }
+
+      if (stageKey === "refactoring") {
+        candidates.push(value.status, value.refactoring_status, value.pipeline_status, value.result);
+      }
+
+      for (const candidate of candidates) {
+        const normalized = normalizeReportStatus(candidate);
+        if (normalized) return normalized;
+      }
+
+      if (stageKey === "homologation") {
+        if (value.test_passed === true) return { label: "PASSED", state: "passed" };
+        if (value.test_passed === false) return { label: "FAILED", state: "failed" };
+      }
+
+      if (stageKey === "finalization") {
+        const testPassed = value.final_result?.test_passed;
+        if (testPassed === true || testPassed === "true") return { label: "PASSED", state: "passed" };
+        if (testPassed === false || testPassed === "false") return { label: "FAILED", state: "failed" };
+      }
+
+      if (stageKey === "refactoring") {
+        if (value.error || value.failed === true) return { label: "FAILED", state: "failed" };
+        if (value.refactored_script || value.original_script) return { label: "PASSED", state: "passed" };
+      }
+
+      return null;
+    };
+
+    const injectReportStatus = (containerId, stageKey, value) => {
+      const container = byId(containerId);
+      if (!container) return;
+      const card = container.querySelector(".report-card");
+      if (!card) return;
+
+      card.querySelector(".report-status")?.remove();
+      const status = resolveReportStatus(stageKey, value);
+      if (!status) return;
+
+      const pill = document.createElement("div");
+      pill.className = `report-status report-status-${status.state}`;
+      pill.textContent = status.label;
+      card.prepend(pill);
     };
 
     const renderExecutionReport = (execution) => {
@@ -1748,6 +1843,7 @@
           container.appendChild(summary);
         }
       });
+      injectReportStatus("executionContent", "execution", execution);
     };
 
     const renderHomologationReport = (homologation) => {
@@ -1788,10 +1884,12 @@
           renderScreenshotGallery(imageArtifacts, container, "Screenshots");
         }
       });
+      injectReportStatus("homologationContent", "homologation", homologation);
     };
 
     const renderFinalizationReport = (report) => {
       renderReportSection("finalizationContent", "Finalização", report);
+      injectReportStatus("finalizationContent", "finalization", report);
       const exportables = report?.exportables || {};
       const container = byId("finalizationContent");
       if (!container) return;
@@ -1854,6 +1952,7 @@
           container.appendChild(just);
         }
       });
+      injectReportStatus("refactoringContent", "refactoring", refactoring);
 
       const editor = byId("refactoringScriptEditor");
       if (editor && refactoring?.refactored_script) {
