@@ -20,6 +20,8 @@ __pycache__/
 *.sln
 *.sw?
 
+/paper/
+
 .DS_Store
 Thumbs.db
 

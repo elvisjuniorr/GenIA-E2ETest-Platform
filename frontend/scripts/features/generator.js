@@ -1341,9 +1341,6 @@
         </aside>
         <div class="graph-stage">
           <div class="graph-viewport">
-            <div>
-              <p class="graph-stage-subtitle">${escapeHtml(stageLabel)}</p>
-            </div>
             <svg class="graph-svg"></svg>
           </div>
         </div>
@@ -1985,14 +1982,17 @@
             extraction: "extractedTreeContent",
             refinement: "refinedTreeContent",
           };
+          // <div class="report-shell">
+          //   <div class="report-card">
+          //     <div id="${treeId}" class="graph-host"></div>
+          //   </div>
+          // </div>
           const treeId = treeIdMap[tab.key] || `${tab.key}TreeContent`;
           return `
             <div id="tab-${tab.key}" class="result-tab">
               <div class="dual-result-layout">
                 <div class="report-shell">
-                  <div class="report-card">
-                    <div id="${treeId}" class="graph-host"></div>
-                  </div>
+                  <div id="${treeId}" class="graph-host"></div>
                 </div>
                 <div class="report-shell">
                   <div class="code-actions">
@@ -2065,7 +2065,6 @@
           return `
             <div id="tab-homologation" class="result-tab">
               <div class="report-shell">
-                <div id="homologationHeader" class="status-banner hidden"></div>
                 <div id="homologationContent" class="report-host"></div>
               </div>
             </div>
@@ -2134,7 +2133,6 @@
                   <div class="report-card" style="padding: 0rem;">
                     <div id="${treeId}" class="graph-host"></div>
                   </div>
-                </div>
                 <div class="report-shell">
                   <div class="code-actions">
                     <button type="button" class="btn-secondary" data-copy-target="${tab.contentId}">Copiar JSON</button>

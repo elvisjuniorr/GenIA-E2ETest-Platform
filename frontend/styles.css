@@ -618,6 +618,7 @@ label {
   font-size: 2rem;
   font-weight: 800;
   letter-spacing: -0.04em;
+
 }
 
 .stat-label {
@@ -931,7 +932,7 @@ label {
 
 .code-actions > button {
     width: 35%;
-    height: -webkit-fill-available;
+    height: 3rem;
 }
 
 .step-row {
@@ -1270,6 +1271,7 @@ label {
   padding: 1rem;
   height: 100%;
   min-height: 50rem;
+  min-width: 0;
 }
 
 .report-host {
@@ -1303,7 +1305,6 @@ label {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
   height: 100%;
 }
 
@@ -1317,7 +1318,7 @@ label {
 
 .graph-viewport {
   width: 100%;
-  height: 20rem;
+  height: 100%;
   overflow: auto;
   border-radius: 18px;
   border: 1px solid var(--border);
@@ -1334,12 +1335,6 @@ label {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
-}
-
-.graph-stage-subtitle {
-  margin: 4px 0 0;
-  color: var(--text-secondary);
-  font-size: 0.84rem;
 }
 
 .graph-svg {
@@ -1398,21 +1393,11 @@ label {
   display: flex;
   gap: 0.5rem;
   padding: 0.5rem;
-  border-radius: 0.8rem;
+  border-radius: 14px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: var(--shadow-sm);
   width: 100%;
-}
-
-.graph-legend {
-  padding: 0.5rem;
-  display: block;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: var(--shadow-sm);
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 0.8rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
 }
 
 
@@ -1420,9 +1405,10 @@ label {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.25rem;
   color: var(--text-secondary);
   font-size: x-small;
+  font-weight: 600;
 }
 
 .legend-swatch,
@@ -1435,6 +1421,7 @@ label {
   gap: 0.5rem;
   justify-content: center;
   flex-wrap: wrap;
+  min-height: 3rem;
 }
 
 .legend-swatch {
@@ -1859,6 +1846,11 @@ label {
   background: var(--surface-2);
 }
 
+.report-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    align-items: stretch;
+}
 /* .report-item {
   padding: 12px 14px;
 }
@@ -1878,13 +1870,6 @@ label {
   color: var(--text-secondary);
   font-size: 0.92rem;
 } */
-
-.report-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    width: 100%;
-}
 
 .report-item {
     border: 1px solid var(--border);
@@ -2333,10 +2318,6 @@ label {
     grid-template-columns: 1fr;
   }
 
-  .graph-legend {
-    position: static;
-  }
-
   .dual-result-layout {
     grid-template-columns: 1fr;
   }
@@ -2617,10 +2598,6 @@ label {
   align-items: stretch;
 }
 
-.report-shell {
-  min-width: 0;
-}
-
 .graph-stage,
 .report-card {
   height: 100%;
@@ -2636,15 +2613,6 @@ label {
 .graph-svg {
   width: 100%;
   height: 100%;
-}
-
-.graph-legend {
-  position: sticky;
-  top: 18px;
-  border: 1px solid rgba(222, 216, 205, 0.9);
-  border-radius: 20px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(247, 244, 238, 0.82));
-  box-shadow: var(--shadow-sm);
 }
 
 .legend-item {
@@ -2699,15 +2667,11 @@ label {
   border: 1px solid rgba(191, 59, 47, 0.2);
 }
 
-.report-grid {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  align-items: start;
-}
-
 .report-item {
   min-height: 56px;
   padding: 12px 14px;
   background: rgba(255, 255, 255, 0.8);
+  margin-bottom: 0.5rem;
 }
 
 .report-item-label {
@@ -2727,7 +2691,7 @@ label {
   min-height: 160px;
 }
 
-.report-card--empty .report-grid {
+.report-card--empty {
   min-height: 92px;
 }
 
@@ -2850,14 +2814,6 @@ label {
     grid-template-columns: 1fr;
   }
 
-  .graph-legend {
-    position: static;
-  }
-
-  .code-container pre {
-    min-height: 420px;
-    max-height: 620px;
-  }
 }
 
 @media (max-width: 900px) {
@@ -2911,11 +2867,6 @@ label {
     padding: 14px;
   }
 
-  .code-container pre {
-    min-height: 360px;
-    max-height: 540px;
-  }
-
 }
 
 @media (max-width: 640px) {
@@ -2964,22 +2915,9 @@ label {
     padding: 12px;
   }
 
-  .code-container pre {
-    min-height: 320px;
-    max-height: 460px;
-  }
-
-  .graph-legend {
-    border-radius: 18px;
-  }
-
   .report-card {
     padding: 14px;
     border-radius: 18px;
-  }
-
-  .report-grid {
-    grid-template-columns: 1fr;
   }
 
   .report-summary-grid {
@@ -2994,8 +2932,8 @@ label {
     grid-template-columns: 1fr;
   }
 
-  .report-item-value,
-  .code-container pre {
+  .report-item-value{
     max-height: none;
   }
+
 }
