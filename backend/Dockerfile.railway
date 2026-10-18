@@ -1,0 +1,24 @@
+FROM mcr.microsoft.com/playwright/python:v1.60.0-jammy
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+COPY backend/requirements.txt /tmp/requirements.txt
+COPY backend/Aptfile /tmp/Aptfile
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive xargs -a /tmp/Aptfile apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --upgrade pip \
+    && pip install -r /tmp/requirements.txt
+
+COPY backend /app/backend
+
+EXPOSE 8080
+
+CMD ["sh", "-c", "exec gunicorn backend.api:app --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 4 --worker-class gthread --timeout 600 --keep-alive 120"]

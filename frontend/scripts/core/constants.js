@@ -38,8 +38,8 @@
       { key: "finalization", label: "Finalização", promptKey: "finalization", resultId: "finalizationContent" },
       { key: "refactoring", label: "Refatoração", promptKey: "refactoring", resultId: "refactoringContent" },
     ],
-    API_BASE_URL: ["localhost", "127.0.0.1"].includes(window.location.hostname)
+    API_BASE_URL: window.GENIA_API_BASE_URL || ( ["localhost", "127.0.0.1"].includes(window.location.hostname)
       ? "http://localhost:5000/api"
-      : "https://genia-e2etest-platform-back.onrender.com/api",
+      : "https://genia-e2etest-platform-back.onrender.com/api"),
   };
 })();
