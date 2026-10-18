@@ -85,21 +85,18 @@ Character-by-character equality is required.
 
 HARD REQUIREMENTS
 
-* The script must be executable in a normal local desktop environment.
-* Assume the application under test is running locally and the browser is launched on the same machine.
-* Use a standard SeleniumLibrary browser bootstrap that works with a local Chrome installation.
-* Prefer a simple `Open Browser` or `Create Webdriver` setup only if it is already required by the test structure.
-* If browser options are used, keep them compatible with a normal local Chrome installation.
-* If you define a browser bootstrap, keep it simple and self-contained, and call it from `Suite Setup`.
-* Do not hardcode assumptions about containerized, CI, cloud, hosted, remote, or headless environments.
-* Do not mention or depend on Render, Docker, Selenium Grid, remote browsers, or `CHROME_BIN` unless the test truly depends on them.
-* Use visible browser execution by default; do not force headless mode.
+* Generate a script for SeleniumLibrary running the test in the backend's Linux browser runtime.
+* Assume the application under test is reachable at the URL supplied in the test case; do not assume it runs on the same machine as the browser.
+* Use standard SeleniumLibrary keywords and a minimal browser setup, such as `Open Browser    ${URL}    chrome`, with `Close All Browsers` as suite teardown.
+* Do not create a custom Chrome binary path or set `binary_location`; the execution runtime selects the installed browser and its driver.
+* Do not add local desktop display settings, remote WebDriver URLs, Selenium Grid configuration, or operating-system-specific paths.
+* Do not force visible browser mode. The execution runtime may run Chrome headlessly and supplies its required container launch flags.
 * Do not use the deprecated old Robot Framework `:FOR` loop syntax.
 * If a loop is needed, use only the modern `FOR    ...    END` syntax.
 * Use only valid Robot Framework + SeleniumLibrary keywords.
 * Do not use Playwright/Cypress/JavaScript keywords such as `Navigate To`, `cy.visit`, `describe`, `it`, `expect`, or similar non-Robot syntax.
 * Prefer Robot keywords like `Go To`, `Open Browser`, `Input Text`, `Click Element`, `Wait Until Element Is Visible`, `Page Should Contain`, and `Page Should Contain Element`.
-* Make sure browser initialization is compatible with a local Selenium + Chrome setup.
+* Make sure browser initialization uses valid SeleniumLibrary keywords and works with the provided backend browser runtime.
 * Use robust waits and stable selectors.
 * Keep the test self-contained and executable.
 * Prefer a simple suite setup with direct SeleniumLibrary usage rather than custom helper keywords.

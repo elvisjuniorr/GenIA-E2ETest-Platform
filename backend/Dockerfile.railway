@@ -16,9 +16,39 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --upgrade pip \
     && pip install -r /tmp/requirements.txt \
-    && python -m playwright install chromium
+    && python -m playwright install chromium \
+    && chrome_binary="$(find /ms-playwright/chromium-* -type f -path '*/chrome-linux64/chrome' | sort -V | tail -n 1)" \
+    && test -n "$chrome_binary" \
+    && printf '#!/bin/sh\nexec "%s" --no-sandbox --disable-dev-shm-usage --disable-gpu --headless=new "$@"\n' "$chrome_binary" > /usr/local/bin/google-chrome \
+    && chmod +x /usr/local/bin/google-chrome \
+    && ln -sf /usr/local/bin/google-chrome /usr/bin/google-chrome-stable \
+    && ln -sf /usr/local/bin/google-chrome /usr/bin/google-chrome
 
 COPY backend /app/backend
+
+# Exercise the exact Robot Framework execution strategy used by the API while
+# building the image. This fails the deploy early if Chrome cannot be started.
+RUN python - <<'PY'
+from backend.infrastructure.TestExecutor import TestExecutor
+
+smoke_script = """*** Settings ***
+Library    SeleniumLibrary
+
+*** Test Cases ***
+Chrome launches in the backend runtime
+    Open Browser    data:text/html,<title>GenIA Railway smoke</title>    chrome
+    Title Should Be    GenIA Railway smoke
+    Close Browser
+"""
+
+result = TestExecutor().execute("robotframework", smoke_script, language="python")
+if result.status != "passed":
+    print("Robot Framework Chrome smoke test failed:")
+    print(result.stdout)
+    print(result.stderr)
+    raise SystemExit(1)
+print("Robot Framework Chrome smoke test passed")
+PY
 
 EXPOSE 8080
 

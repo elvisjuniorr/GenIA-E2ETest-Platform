@@ -93,9 +93,13 @@ class BaseExecutionStrategy(ABC):
 
     def _discover_chrome_binary(self) -> str | None:
         candidates: list[str] = []
+        # Container images may provide a Chrome wrapper that supplies the
+        # flags required by headless/container server execution. Prefer it over
+        # the underlying Playwright browser binary so SeleniumLibrary uses the
+        # same stable launch configuration.
+        candidates.extend(("/usr/local/bin/google-chrome", "/usr/bin/google-chrome"))
         candidates.extend(glob.glob("/ms-playwright/chromium-*/chrome-linux64/chrome"))
         candidates.extend(glob.glob("/ms-playwright/chromium-*/chrome-linux/chrome"))
-        candidates.extend(glob.glob("/usr/bin/google-chrome"))
         candidates.extend(glob.glob("/usr/bin/chromium"))
         candidates.extend(glob.glob("/usr/bin/chromium-browser"))
         for candidate in candidates:
