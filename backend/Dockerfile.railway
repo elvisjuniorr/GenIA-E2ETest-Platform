@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright/python:v1.64.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.60.0-jammy
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -15,7 +15,8 @@ RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive xargs -a /tmp/Aptfile apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --upgrade pip \
-    && pip install -r /tmp/requirements.txt
+    && pip install -r /tmp/requirements.txt \
+    && python -m playwright install chromium
 
 COPY backend /app/backend
 
