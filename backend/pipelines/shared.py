@@ -230,6 +230,8 @@ def _create_browser_config(headless: bool) -> Any:
         browser_mode="dedicated",
         headless=headless,
         verbose=True,
+        text_mode=True,
+        light_mode=True,
         cache_cdp_connection=True,
         cdp_close_delay=0,
         create_isolated_context=True,
