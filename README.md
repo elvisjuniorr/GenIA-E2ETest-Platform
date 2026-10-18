@@ -230,7 +230,7 @@ Click on `Config. LLM` and fill in the form with:
 
 - Configuration name: `LLM for GenIA testing`
 - Provider: `OpenAI`
-- Model: `gpt-4o-mini`
+- Model: `gpt-5.6-terra`
 - Temperature: `0`
 - API Key: `[PASTE_YOUR_API_KEY]`
 

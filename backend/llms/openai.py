@@ -63,6 +63,11 @@ class OpenAIProvider:
             api_key=api_key
         )
 
+        request_options = {}
+        if model.startswith(("gpt-5.6", "gpt-5.4")):
+            # These reasoning models accept temperature when reasoning is disabled.
+            request_options["reasoning_effort"] = "none"
+
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -72,6 +77,7 @@ class OpenAIProvider:
                 }
             ],
             temperature=temperature,
+            **request_options,
         )
 
         return response.choices[0].message.content
