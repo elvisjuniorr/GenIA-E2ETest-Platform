@@ -3321,9 +3321,9 @@ label {
 .execution-live-viewer img {
   display: block;
   width: 100%;
-  max-height: min(70vh, 720px);
-  min-height: 180px;
+  height: min(70vh, 720px);
   object-fit: contain;
+  object-position: center;
   background: #0b1220;
 }
 
