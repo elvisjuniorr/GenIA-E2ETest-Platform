@@ -202,6 +202,17 @@
       const payload = event?.payload || {};
       const stageKey = stageToResultKey[channel];
 
+      if (type === "STAGE_QUEUED" && channel === "extraction_refinement") {
+        updatePipelineWaitModal(
+          "WAITING_HEAVY_STAGE",
+          "Aguardando uma vaga para extração/refinamento.",
+          payload
+        );
+      }
+      if (type === "STAGE_SLOT_ACQUIRED" && channel === "extraction_refinement") {
+        updatePipelineWaitModal("EXTRACTION");
+      }
+
       if (type === "STAGE_START" && stageKey) {
         setResultStageState(stageKey, "running");
       }
@@ -390,7 +401,7 @@
 
       configs.forEach((config) => {
         const selected = selectedId === config.id ? " selected" : "";
-        const meta = `${config.provider} Â· ${config.model}`;
+        const meta = `${config.provider} | ${config.model}`;
         options.push(
           `<option value="${escapeHtml(config.id)}"${selected}>${escapeHtml(config.name)} — ${escapeHtml(meta)}</option>`
         );
@@ -692,7 +703,7 @@
           <div class="provider-badge provider-badge-sm">${PROVIDER_SHORT[config.provider] || "?"}</div>
           <div class="llm-selector-copy">
             <div class="config-name">${escapeHtml(config.name)}</div>
-            <div class="config-meta">${escapeHtml(config.provider)} Â· ${escapeHtml(config.model)} Â· temp ${config.temperature}</div>
+            <div class="config-meta">${escapeHtml(config.provider)} | ${escapeHtml(config.model)} | temp ${config.temperature}</div>
           </div>
         `;
 
@@ -1934,6 +1945,38 @@
       banner.classList.remove("hidden");
     };
 
+    const updatePipelineWaitModal = (state, message, details = {}) => {
+      const modal = byId("pipelineWaitModal");
+      if (!modal) return;
+
+      const waitingForPipeline = ["queued", "QUEUED"].includes(state);
+      const waitingForHeavyStage = state === "WAITING_HEAVY_STAGE";
+      if (!waitingForPipeline && !waitingForHeavyStage) {
+        modal.classList.remove("is-open");
+        modal.setAttribute("aria-hidden", "true");
+        return;
+      }
+
+      const title = byId("pipelineWaitTitle");
+      const description = byId("pipelineWaitMessage");
+      const position = byId("pipelineWaitPosition");
+      if (title) title.textContent = waitingForHeavyStage ? "Aguardando vaga de navegador" : "Pipeline aguardando na fila";
+      if (description) {
+        description.textContent = waitingForHeavyStage
+          ? "As vagas de extração/refinamento estão ocupadas. Sua pipeline começa essa etapa assim que uma liberar."
+          : "O limite de pipelines ativas foi atingido. Sua execução começará quando houver uma vaga.";
+      }
+      const queuePosition = Number(details.queue_position || 0);
+      if (position) {
+        position.textContent = queuePosition > 0
+          ? `Posição aproximada na fila: ${queuePosition}`
+          : "Sua execução já está sendo preparada.";
+      }
+      if (message) setValidationFeedback(message, "warning");
+      modal.classList.add("is-open");
+      modal.setAttribute("aria-hidden", "false");
+    };
+
     const updateExecutionArtifacts = (execution) => {
       const artifacts = [
         ...(execution?.screenshots || []),
@@ -2377,6 +2420,12 @@
           llmOverrides: pipelineOverrides.llmOverrides,
         });
         currentSession.onLog = handlePipelineEvent;
+        currentSession.onStatus = (state, message, details) => {
+          updatePipelineWaitModal(state, message, details);
+          if (!(["queued", "QUEUED", "WAITING_HEAVY_STAGE"].includes(state))) {
+            setValidationFeedback(message, "info");
+          }
+        };
         setCurrentSession(currentSession);
 
         const resultsEl = byId("generationResults");
@@ -2401,6 +2450,7 @@
       try {
         setStep(1, "running");
         addLog("Estruturando caso de teste...", "info");
+        setValidationFeedback("Sua pipeline foi enviada e está sendo posicionada na fila de execução.", "info");
 
         const results = await startPhaseOne(currentSession);
         currentSession.pipelineId = results.pipelineId || currentSession.pipelineId;
@@ -2421,6 +2471,7 @@
         showToast("Validação pronta. Revise os dados e continue quando estiver pronto.", "success");
       } catch (error) {
         console.error(error);
+        updatePipelineWaitModal("ERROR");
         setStep(1, "error");
         addLog(`Erro: ${error.message}`, "error");
         root.api?.geniaAPI?.closePipelineLogStream?.();
@@ -2481,6 +2532,7 @@
         currentSession.completed = true;
       } catch (error) {
         console.error(error);
+        updatePipelineWaitModal("ERROR");
         setStep(6, "error");
         addLog(`Erro ao continuar: ${error.message}`, "error");
         root.api?.geniaAPI?.closePipelineLogStream?.();

@@ -68,6 +68,33 @@
       return this.request(endpoint, "POST", body);
     }
 
+    async submitPipeline(endpoint, body, onStatus = null) {
+      const submitted = await this.post(endpoint, body);
+      if (!submitted.success || submitted.status !== 202) return submitted;
+
+      const pipelineId = submitted.data?.pipeline_id || body.pipeline_id;
+      if (!pipelineId) return { success: false, error: "O servidor não retornou o ID da pipeline." };
+      onStatus?.("queued", submitted.data);
+
+      while (true) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const statusResponse = await this.get(`/pipeline/status/${encodeURIComponent(pipelineId)}`);
+        if (!statusResponse.success) return statusResponse;
+        const current = statusResponse.data?.status;
+        onStatus?.(current, statusResponse.data);
+
+        if (["WAITING_VALIDATION", "COMPLETED", "ERROR"].includes(current)) {
+          return {
+            success: current !== "ERROR",
+            status: 200,
+            error: statusResponse.data.result?.error,
+            data: statusResponse.data.result || { status: current === "ERROR" ? "error" : "completed", pipeline_id: pipelineId },
+          };
+        }
+        if (current === "missing") return { success: false, error: "A sessão da pipeline expirou. Inicie novamente." };
+      }
+    }
+
     healthCheck() {
       return this.get("/health").then((response) => response.data);
     }
@@ -178,9 +205,10 @@
       headless = true,
       attempt = 1,
       pipelineId = null,
-      promptOverrides = null
+      promptOverrides = null,
+      onStatus = null
     ) {
-      return this.post("/pipeline/run-until-validation", {
+      const payload = {
         test_case: testCase,
         framework,
         language,
@@ -192,7 +220,8 @@
         attempt,
         pipeline_id: pipelineId || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`),
         prompt_overrides: promptOverrides || undefined,
-      });
+      };
+      return this.submitPipeline("/pipeline/run-until-validation", payload, onStatus);
     }
 
     runFullPipeline(
@@ -207,9 +236,10 @@
       attempt = 1,
       pipelineId = null,
       promptOverrides = null,
-      llmOverrides = null
+      llmOverrides = null,
+      onStatus = null
     ) {
-      return this.post("/pipeline/run-until-validation", {
+      const payload = {
         test_case: testCase,
         framework,
         language,
@@ -222,7 +252,8 @@
         pipeline_id: pipelineId || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`),
         prompt_overrides: promptOverrides || undefined,
         llm_overrides: llmOverrides || undefined,
-      });
+      };
+      return this.submitPipeline("/pipeline/run-until-validation", payload, onStatus);
     }
 
     runFullPipeline2(
@@ -232,9 +263,10 @@
       resumeFromStage = "confirmation",
       scriptOverride = null,
       promptOverrides = null,
-      llmOverrides = null
+      llmOverrides = null,
+      onStatus = null
     ) {
-      return this.post("/pipeline/continue-after-validation", {
+      const payload = {
         pipeline_id: pipelineId,
         manual_changes: manualChanges,
         continue_without_changes: continueWithoutChanges,
@@ -242,7 +274,8 @@
         script_override: scriptOverride || undefined,
         prompt_overrides: promptOverrides || undefined,
         llm_overrides: llmOverrides || undefined,
-      });
+      };
+      return this.submitPipeline("/pipeline/continue-after-validation", payload, onStatus);
     }
 
     continueAfterValidation(

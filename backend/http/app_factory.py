@@ -9,6 +9,9 @@ import tempfile
 import sys
 import os
 from queue import Empty
+from concurrent.futures import ThreadPoolExecutor
+import threading
+from datetime import datetime, timedelta, timezone
 import traceback
 import uuid
 from functools import wraps
@@ -182,7 +185,99 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
 
     socketio = SocketIO(app, cors_allowed_origins="*")
     limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["200 per day", "50 per hour"], storage_uri="memory://")
-    orchestrator = GenIAOrchestrator(prompts_dir=settings.prompts_dir)
+    max_pipeline_workers = max(1, min(10, int(os.getenv("PIPELINE_MAX_CONCURRENT", "10"))))
+    max_waiting_pipelines = max(0, min(20, int(os.getenv("PIPELINE_MAX_WAITING", "10"))))
+    heavy_stage_concurrency = max(1, min(2, int(os.getenv("HEAVY_STAGE_CONCURRENCY", "2"))))
+    app.config["PIPELINE_MAX_CONCURRENT"] = max_pipeline_workers
+    app.config["PIPELINE_MAX_WAITING"] = max_waiting_pipelines
+    app.config["HEAVY_STAGE_CONCURRENCY"] = heavy_stage_concurrency
+    orchestrator = GenIAOrchestrator(
+        prompts_dir=settings.prompts_dir,
+        heavy_stage_concurrency=heavy_stage_concurrency,
+    )
+    # Ten full pipelines can progress in parallel, while the shared browser
+    # semaphore below limits extraction/refinement to two combined slots.
+    pipeline_executor = ThreadPoolExecutor(max_workers=max_pipeline_workers, thread_name_prefix="genia-pipeline")
+    pipeline_capacity = threading.BoundedSemaphore(max_pipeline_workers + max_waiting_pipelines)
+    pipeline_queue_lock = threading.Lock()
+
+    def submit_pipeline(pipeline_id: str, job, session_data: dict | None = None):
+        now = datetime.now(timezone.utc)
+        with orchestrator._session_lock:
+            expired_ids = []
+            for session_id, old_session in orchestrator.pipeline_sessions.items():
+                try:
+                    updated = datetime.fromisoformat(old_session.get("updated_at", "").replace("Z", "+00:00"))
+                except (TypeError, ValueError):
+                    continue
+                if updated < now - timedelta(hours=2) and old_session.get("state") not in {"QUEUED", "RUNNING"}:
+                    expired_ids.append(session_id)
+            for session_id in expired_ids:
+                orchestrator.pipeline_sessions.pop(session_id, None)
+
+        with pipeline_queue_lock:
+            session = orchestrator._get_session(pipeline_id)
+            if session and session.get("job_active"):
+                return False, "duplicate"
+            if not pipeline_capacity.acquire(blocking=False):
+                return False, "full"
+
+            session = session or orchestrator._create_session(pipeline_id)
+            if session_data:
+                session["data"].update(session_data)
+            session["state"] = "QUEUED"
+            session["job_active"] = True
+            queued_count = sum(
+                1 for current in orchestrator.pipeline_sessions.values()
+                if current.get("state") == "QUEUED"
+            )
+            session["wait_reason"] = "pipeline"
+            session["queue_position"] = queued_count
+            session["api_result"] = None
+            session["updated_at"] = now.isoformat()
+
+        def run_job():
+            session["state"] = "RUNNING"
+            session["wait_reason"] = None
+            session["queue_position"] = 0
+            try:
+                session["api_result"] = job()
+                if session.get("state") == "RUNNING":
+                    result_status = session["api_result"].get("status")
+                    session["state"] = {
+                        "waiting_validation": "WAITING_VALIDATION",
+                        "error": "ERROR",
+                    }.get(result_status, "COMPLETED")
+                if session.get("state") in {"COMPLETED", "ERROR"}:
+                    session.get("data", {}).pop("llm_config", None)
+            except Exception as exc:
+                logger.exception("Pipeline job failed: %s", pipeline_id)
+                session["api_result"] = {"status": "error", "error": str(exc), "pipeline_id": pipeline_id}
+                session["state"] = "ERROR"
+                session.get("data", {}).pop("llm_config", None)
+            finally:
+                session["updated_at"] = datetime.now(timezone.utc).isoformat()
+                session["job_active"] = False
+                pipeline_capacity.release()
+
+        try:
+            pipeline_executor.submit(run_job)
+        except Exception:
+            pipeline_capacity.release()
+            session["state"] = "ERROR"
+            raise
+        return True, "queued"
+
+    def pipeline_accepted(pipeline_id: str):
+        session = orchestrator._get_session(pipeline_id)
+        return jsonify(
+            {
+                "status": "queued",
+                "pipeline_id": pipeline_id,
+                "queue_position": session.get("queue_position", 0) if session else 0,
+                "wait_reason": session.get("wait_reason") if session else None,
+            }
+        ), 202
 
     @app.before_request
     def log_request_start():
@@ -214,6 +309,11 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
             {
                 "frameworks": get_available_frameworks(),
                 "providers": ["openai", "anthropic", "gemini", "cohere"],
+                "pipeline_capacity": {
+                    "max_concurrent": max_pipeline_workers,
+                    "max_waiting": max_waiting_pipelines,
+                    "heavy_stage_concurrency": heavy_stage_concurrency,
+                },
                 "max_upload_size_mb": settings.max_upload_size_mb,
                 "supported_features": [
                     "test_structuring",
@@ -242,7 +342,6 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     @error_handler
     def initialize_pipeline():
         data = request.get_json(force=True)
-        orchestrator.set_provider(data["provider"], data["api_key"], data["model"], data.get("temperature"))
         return (
             jsonify(
                 {
@@ -304,56 +403,74 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
     @error_handler
     def full_pipeline_run():
         data = request.get_json(force=True)
-        orchestrator.set_provider(data["provider"], data["api_key"], data["model"], data.get("temperature"))
-        results = asyncio.run(
-            orchestrator.run_full_pipeline_1(
+        pipeline_id = data.get("pipeline_id") or str(uuid.uuid4())
+        llm_config = {"provider": data["provider"], "api_key": data["api_key"], "model": data["model"], "temperature": data.get("temperature", 0)}
+
+        def run_job():
+            orchestrator.set_provider(**llm_config)
+            return asyncio.run(orchestrator.run_full_pipeline_1(
                 test_case=data["test_case"],
                 framework=data["framework"],
                 language=data["language"],
                 test_name=data.get("test_name", "untitled"),
-                pipeline_id=data.get("pipeline_id"),
+                pipeline_id=pipeline_id,
                 prompt_overrides=data.get("prompt_overrides"),
                 llm_overrides=data.get("llm_overrides"),
                 input_mode=data.get("input_mode", "test_case"),
                 user_story_content=data.get("user_story_content"),
                 user_story_filename=data.get("user_story_filename"),
                 manual_urls=data.get("manual_urls") or [],
-            )
-        )
-        return jsonify(results), 200 if results.get("status") != "error" else 500
+            ))
+
+        accepted, reason = submit_pipeline(pipeline_id, run_job, {"llm_config": llm_config})
+        if not accepted:
+            return jsonify({"error": "A fila de pipelines está cheia. Tente novamente em instantes." if reason == "full" else "Esta pipeline já está em execução."}), (429 if reason == "full" else 409)
+        return pipeline_accepted(pipeline_id)
 
     @app.route("/api/pipeline/run-until-validation", methods=["POST"])
     @validate_request_json("test_case", "framework", "language", "provider", "model", "api_key")
     @error_handler
     def run_until_validation():
         data = request.get_json(force=True)
-        orchestrator.set_provider(data["provider"], data["api_key"], data["model"], data.get("temperature"))
-        result = asyncio.run(
-            orchestrator.run_full_pipeline_1(
+        pipeline_id = data.get("pipeline_id") or str(uuid.uuid4())
+        llm_config = {"provider": data["provider"], "api_key": data["api_key"], "model": data["model"], "temperature": data.get("temperature", 0)}
+
+        def run_job():
+            orchestrator.set_provider(**llm_config)
+            return asyncio.run(orchestrator.run_full_pipeline_1(
                 test_case=data["test_case"],
                 framework=data["framework"],
                 language=data["language"],
                 test_name=data.get("test_name", "test"),
                 headless=data.get("headless", True),
                 attempt=data.get("attempt", 1),
-                pipeline_id=data.get("pipeline_id"),
+                pipeline_id=pipeline_id,
                 prompt_overrides=data.get("prompt_overrides"),
                 llm_overrides=data.get("llm_overrides"),
                 input_mode=data.get("input_mode", "test_case"),
                 user_story_content=data.get("user_story_content"),
                 user_story_filename=data.get("user_story_filename"),
                 manual_urls=data.get("manual_urls") or [],
-            )
-        )
-        return jsonify(result)
+            ))
+
+        accepted, reason = submit_pipeline(pipeline_id, run_job, {"llm_config": llm_config})
+        if not accepted:
+            return jsonify({"error": "A fila de pipelines está cheia. Tente novamente em instantes." if reason == "full" else "Esta pipeline já está em execução."}), (429 if reason == "full" else 409)
+        return pipeline_accepted(pipeline_id)
 
     @app.route("/api/pipeline/continue-after-validation", methods=["POST"])
     @validate_request_json("pipeline_id")
     @error_handler
     def continue_after_validation():
         data = request.get_json(force=True)
-        result = asyncio.run(
-            orchestrator.run_full_pipeline_2(
+        pipeline_id = data["pipeline_id"]
+        session = orchestrator._get_session(pipeline_id)
+        llm_config = session.get("data", {}).get("llm_config") if session else None
+        if not session or not llm_config:
+            return jsonify({"error": "A sessão expirou ou não foi encontrada. Inicie a pipeline novamente."}), 410
+        def run_job():
+            orchestrator.set_provider(**llm_config)
+            return asyncio.run(orchestrator.run_full_pipeline_2(
                 pipeline_id=data["pipeline_id"],
                 manual_changes=data.get("manual_changes"),
                 continue_without_changes=data.get("continue_without_changes", True),
@@ -361,9 +478,12 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
                 script_override=data.get("script_override"),
                 prompt_overrides=data.get("prompt_overrides"),
                 llm_overrides=data.get("llm_overrides"),
-            )
-        )
-        return jsonify(result)
+            ))
+
+        accepted, reason = submit_pipeline(pipeline_id, run_job)
+        if not accepted:
+            return jsonify({"error": "A fila de pipelines está cheia. Tente novamente em instantes." if reason == "full" else "Esta pipeline já está em execução."}), (429 if reason == "full" else 409)
+        return pipeline_accepted(pipeline_id)
 
     @app.route("/api/pipeline/logs/stream/<pipeline_id>", methods=["GET"])
     def stream_pipeline_logs(pipeline_id: str):
@@ -414,10 +534,21 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
 
         return send_file(candidate)
 
+    # The UI polls this endpoint while a long-running job is queued/executing;
+    # applying the general 50/hour limit would terminate valid pipeline runs.
+    @limiter.exempt
     @app.route("/api/pipeline/status/<pipeline_id>", methods=["GET"])
     def pipeline_status(pipeline_id: str):
         session = orchestrator.pipeline_sessions.get(pipeline_id)
         if not session:
+            return jsonify({"status": "missing", "pipeline_id": pipeline_id}), 404
+        try:
+            updated = datetime.fromisoformat(session.get("updated_at", "").replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            updated = datetime.now(timezone.utc)
+        if updated < datetime.now(timezone.utc) - timedelta(hours=2) and session.get("state") not in {"QUEUED", "RUNNING"}:
+            with orchestrator._session_lock:
+                orchestrator.pipeline_sessions.pop(pipeline_id, None)
             return jsonify({"status": "missing", "pipeline_id": pipeline_id}), 404
         return jsonify(
             {
@@ -426,12 +557,23 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
                 "paused_at": session.get("paused_at"),
                 "history": session.get("history", []),
                 "timeline": session.get("timeline", []),
+                "result": session.get("api_result"),
+                "wait_reason": session.get("wait_reason"),
+                "queue_position": session.get("queue_position", 0),
             }
         ), 200
 
     @app.route("/api/logs", methods=["GET"])
     def get_logs():
-        return jsonify({"ok": True, "logs": orchestrator.execution_logs, "count": len(orchestrator.execution_logs)})
+        with orchestrator._session_lock:
+            logs = [
+                entry
+                for session in orchestrator.pipeline_sessions.values()
+                for entry in session.get("execution_logs", [])
+            ]
+        logs.sort(key=lambda entry: entry.get("timestamp", ""))
+        logs = logs[-500:]
+        return jsonify({"ok": True, "logs": logs, "count": len(logs)})
 
     @app.route("/api/logs/clear", methods=["POST"])
     @error_handler

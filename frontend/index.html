@@ -70,12 +70,6 @@
 
   <div id="appPanel" class="app-panel">
     <aside class="sidebar">
-      <div class="sidebar-brand">
-        <div class="brand-mark">G</div>
-        <span class="brand-text">GenIA-E2ETest</span>
-        <img class="geniaLogoPanel" src="geniaLogo.jpg">
-      </div>
-
       <div class="sidebar-user">
         <div class="label">Usuário</div>
         <div class="email" id="userEmail">—</div>
@@ -84,21 +78,21 @@
       <nav class="sidebar-nav" aria-label="Navegação principal">
         <div class="nav-section">
           <button class="nav-item active" data-screen="dashboard" type="button">
-            <span class="nav-icon">▣</span>
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span>
             Dashboard
           </button>
         </div>
 
         <div class="nav-section">
           <button class="nav-item" data-screen="llm-config" type="button">
-            <span class="nav-icon">◌</span>
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></span>
             Config. LLM
           </button>
         </div>
 
         <div class="nav-section">
           <button class="nav-item" id="genTestNavBtn" data-screen="test-generator" type="button">
-            <span class="nav-icon">✦</span>
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2L12 3Z"/><path d="m19 15 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z"/></svg></span>
             Gerar Testes
             <span class="nav-chevron">›</span>
           </button>
@@ -109,17 +103,14 @@
             <button class="nav-sub-item" data-screen="test-generator" data-section="prompts-section" type="button">Prompts</button>
           </div>
         </div>
-
-        <div class="nav-section">
-          <button class="nav-item" data-screen="history" type="button">
-            <span class="nav-icon">◔</span>
-            Histórico
-          </button>
-        </div>
       </nav>
 
       <div class="sidebar-footer">
         <img class="geniaLogo" src="geniaLogo.jpg">
+        <button class="nav-item" data-screen="profile" type="button">
+          <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></span>
+          Perfil
+        </button>
         <button id="logoutBtn" class="btn-logout" type="button">
           <span class="nav-icon">↩</span>
           Sair
@@ -128,6 +119,31 @@
     </aside>
 
     <main class="main-content">
+      <section id="profile" class="screen">
+        <header class="page-header">
+          <h2>Perfil</h2>
+          <p>Informações da sua conta</p>
+        </header>
+
+        <section class="section-card profile-card" aria-label="Dados da conta">
+          <div class="profile-avatar" aria-hidden="true" id="profileInitials">?</div>
+          <div class="profile-details">
+            <div class="profile-detail">
+              <span>Nome</span>
+              <strong id="profileName">—</strong>
+            </div>
+            <div class="profile-detail">
+              <span>E-mail</span>
+              <strong id="profileEmail">—</strong>
+            </div>
+            <div class="profile-detail">
+              <span>Data de nascimento</span>
+              <strong id="profileBirthDate">—</strong>
+            </div>
+          </div>
+        </section>
+      </section>
+
       <section id="dashboard" class="screen active">
         <header class="page-header">
             <h2>Dashboard</h2>
@@ -248,11 +264,6 @@
       </section>
 
       <section id="test-generator" class="screen">
-        <header class="page-header">
-          <h2>Gerar teste E2E</h2>
-          <p>Configure e execute o pipeline de geração</p>
-        </header>
-
         <div class="generator-layout">
           <section class="section-card" id="input-type">
             <h3>Tipo de entrada</h3>
@@ -348,20 +359,21 @@
             </div>
           </section>
 
-          <section class="section-card" id="prompts-section">
-            <h3>Prompts</h3>
-            <p class="helper-text">Customize os prompts de cada etapa do pipeline, ou use os padrões do backend</p>
-            <div class="prompt-llm-panel">
+          <section class="section-card prompt-llm-panel prompt-global-llm-card">
               <div class="prompt-llm-panel-head">
                 <div>
-                  <h4>LLM global</h4>
+                  <h4>LLM GLOBAL</h4>
                   <p>Esta configuração é herdada por todas as etapas, a menos que você escolha um modelo específico no card da etapa.</p>
                 </div>
               </div>
               <div id="llmSelectorList" class="llm-selector-list">
                 <p class="empty-state">Nenhuma configuração de LLM salva. Configure em <strong>Config. LLM</strong>.</p>
               </div>
-            </div>
+          </section>
+
+          <section class="section-card" id="prompts-section">
+            <h3>Prompts</h3>
+            <p class="helper-text">Customize os prompts de cada etapa do pipeline, ou use os padrões do backend</p>
             <div id="promptsAccordion" class="stack"></div>
           </section>
 
@@ -369,27 +381,17 @@
           <div id="generationResults" class="generation-results" style="display:none;"></div>
         </div>
       </section>
-
-      <section id="history" class="screen">
-        <header class="page-header">
-          <h2>Histórico</h2>
-          <p>Todos os testes gerados</p>
-        </header>
-
-        <div class="filter-bar">
-          <input type="text" id="historySearch" class="search-input" placeholder="Buscar por nome, projeto..." />
-          <select id="historyFilter" class="filter-select">
-            <option value="">Todos</option>
-            <option value="success">Sucesso</option>
-            <option value="error">Erro</option>
-          </select>
-        </div>
-
-        <div id="historyList" class="history-list">
-          <p class="empty-state">Nenhum teste encontrado</p>
-        </div>
-      </section>
     </main>
+  </div>
+
+  <div id="pipelineWaitModal" class="pipeline-wait-overlay" aria-hidden="true">
+    <section class="pipeline-wait-dialog" role="dialog" aria-modal="true" aria-labelledby="pipelineWaitTitle" aria-describedby="pipelineWaitMessage">
+      <div class="pipeline-wait-spinner" aria-hidden="true"></div>
+      <h2 id="pipelineWaitTitle">Preparando execução</h2>
+      <p id="pipelineWaitMessage" aria-live="polite">Aguarde enquanto reservamos recursos para sua pipeline.</p>
+      <p id="pipelineWaitPosition" class="pipeline-wait-position"></p>
+      <small>Você pode manter esta aba aberta; o progresso aparecerá aqui e nos logs.</small>
+    </section>
   </div>
 
   <div id="toast-container" class="toast-container"></div>
@@ -407,7 +409,7 @@
   <script src="scripts/services/generation.js?v=20261018" defer></script>
   <script src="scripts/features/navigation.js?v=20261018" defer></script>
   <script src="scripts/features/dashboard.js?v=20261018" defer></script>
-  <script src="scripts/features/history.js?v=20261018" defer></script>
+  <script src="scripts/features/profile.js?v=20261018" defer></script>
   <script src="scripts/features/llm-config.js?v=20261018" defer></script>
   <script src="scripts/features/generator.js?v=20261018" defer></script>
   <script src="scripts/features/auth.js?v=20261018" defer></script>

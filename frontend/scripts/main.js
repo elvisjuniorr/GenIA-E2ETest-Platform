@@ -10,7 +10,6 @@
     controllers.generator?.refreshLLMSelectorInGenerator?.();
     controllers.generator?.refreshProjectOptions?.();
     controllers.dashboard?.updateDashboard?.();
-    controllers.history?.updateHistory?.();
   };
 
   const initializeApp = () => {
@@ -28,7 +27,7 @@
           controllers.generator?.refreshProjectOptions?.();
         }
         if (screen === "dashboard") controllers.dashboard?.updateDashboard?.();
-        if (screen === "history") controllers.history?.updateHistory?.();
+        if (screen === "profile") controllers.profile?.refreshProfile?.();
       },
     });
 
@@ -41,13 +40,13 @@
     });
 
     controllers.dashboard = root.features.dashboard.setupDashboard();
-    controllers.history = root.features.history.setupHistory();
+    controllers.profile = root.features.profile.setupProfilePage();
 
     setController("navigation", controllers.navigation);
     setController("llmConfig", controllers.llmConfig);
     setController("generator", controllers.generator);
     setController("dashboard", controllers.dashboard);
-    setController("history", controllers.history);
+    setController("profile", controllers.profile);
 
     appState.initialized = true;
     refreshAllViews();

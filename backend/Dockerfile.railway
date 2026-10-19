@@ -52,4 +52,6 @@ PY
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "exec gunicorn backend.api:app --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 4 --worker-class gthread --timeout 600 --keep-alive 120"]
+# One process keeps the in-memory queue/semaphore coordinated; enough request
+# threads remain available for 10 concurrent SSE log streams plus API polling.
+CMD ["sh", "-c", "exec gunicorn backend.api:app --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 24 --worker-class gthread --timeout 600 --keep-alive 120"]

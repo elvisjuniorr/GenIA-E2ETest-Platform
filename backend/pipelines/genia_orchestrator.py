@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import queue
 import threading
 import traceback
 import uuid
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -69,17 +71,73 @@ logger = logging.getLogger(__name__)
 
 
 class GenIAOrchestrator:
-    def __init__(self, prompts_dir: str = "prompts"):
+    def __init__(self, prompts_dir: str = "prompts", heavy_stage_concurrency: int = 2):
         self.prompt_manager = PromptManager(prompts_dir)
-        self.execution_logs: list[dict[str, Any]] = []
+        self._global_execution_logs: list[dict[str, Any]] = []
+        self._execution_logs_context = contextvars.ContextVar(f"genia_execution_logs_{id(self)}", default=None)
         self.pipeline_sessions: dict[str, dict[str, Any]] = {}
-        self.llm_provider = None
-        self.current_provider = ""
-        self.current_model = ""
-        self.current_api_key = ""
-        self.current_temperature = 0.0
+        self._llm_context = threading.local()
         self._session_lock = threading.Lock()
-        self._pipeline_lock = threading.Lock()
+        # Pipeline stages use per-session state and per-thread LLM context.
+        # A no-op context preserves the existing method structure without
+        # serializing otherwise independent pipelines.
+        self._pipeline_lock = nullcontext()
+        self._heavy_stage_capacity = max(1, min(2, int(heavy_stage_concurrency)))
+        self._heavy_stage_semaphore = threading.BoundedSemaphore(self._heavy_stage_capacity)
+        self._heavy_stage_wait_lock = threading.Lock()
+        self._heavy_stage_waiters = 0
+
+    @property
+    def execution_logs(self) -> list[dict[str, Any]]:
+        logs = self._execution_logs_context.get()
+        return logs if logs is not None else self._global_execution_logs
+
+    @execution_logs.setter
+    def execution_logs(self, logs: list[dict[str, Any]]) -> None:
+        if self._execution_logs_context.get() is None:
+            self._global_execution_logs = logs
+        else:
+            self._execution_logs_context.set(logs)
+
+    @property
+    def llm_provider(self):
+        return getattr(self._llm_context, "provider", None)
+
+    @llm_provider.setter
+    def llm_provider(self, value):
+        self._llm_context.provider = value
+
+    @property
+    def current_provider(self) -> str:
+        return getattr(self._llm_context, "current_provider", "")
+
+    @current_provider.setter
+    def current_provider(self, value: str) -> None:
+        self._llm_context.current_provider = value
+
+    @property
+    def current_model(self) -> str:
+        return getattr(self._llm_context, "current_model", "")
+
+    @current_model.setter
+    def current_model(self, value: str) -> None:
+        self._llm_context.current_model = value
+
+    @property
+    def current_api_key(self) -> str:
+        return getattr(self._llm_context, "current_api_key", "")
+
+    @current_api_key.setter
+    def current_api_key(self, value: str) -> None:
+        self._llm_context.current_api_key = value
+
+    @property
+    def current_temperature(self) -> float:
+        return getattr(self._llm_context, "current_temperature", 0.0)
+
+    @current_temperature.setter
+    def current_temperature(self, value: float) -> None:
+        self._llm_context.current_temperature = value
 
     def set_provider(self, provider: str, api_key: str, model: str, temperature: float | None = None) -> None:
         self.llm_provider = LLMFactory.get_provider(provider)
@@ -122,6 +180,41 @@ class GenIAOrchestrator:
             return
         session["state"] = state
         session["updated_at"] = _iso_now()
+
+    def _acquire_heavy_stage_slot(self, pipeline_id: str) -> None:
+        if not self._heavy_stage_semaphore.acquire(blocking=False):
+            with self._heavy_stage_wait_lock:
+                self._heavy_stage_waiters += 1
+                position = self._heavy_stage_waiters
+            session = self._get_session(pipeline_id)
+            if session:
+                session["wait_reason"] = "heavy_stage"
+                session["queue_position"] = position
+            self._set_session_state(pipeline_id, "WAITING_HEAVY_STAGE")
+            self.push_event(
+                "STAGE_QUEUED",
+                "extraction_refinement",
+                {
+                    "message": "Aguardando vaga para extração/refinamento.",
+                    "queue_position": position,
+                    "capacity": self._heavy_stage_capacity,
+                },
+                pipeline_id,
+            )
+            self._heavy_stage_semaphore.acquire()
+            with self._heavy_stage_wait_lock:
+                self._heavy_stage_waiters -= 1
+        session = self._get_session(pipeline_id)
+        if session:
+            session["wait_reason"] = None
+            session["queue_position"] = 0
+        self._set_session_state(pipeline_id, PipelineStage.EXTRACTION.value)
+        self.push_event(
+            "STAGE_SLOT_ACQUIRED",
+            "extraction_refinement",
+            {"message": "Vaga de extração/refinamento liberada.", "capacity": self._heavy_stage_capacity},
+            pipeline_id,
+        )
 
     def log(self, message: str, level: str = "info", stage: str = "") -> None:
         timestamp = _iso_now()
@@ -206,6 +299,7 @@ class GenIAOrchestrator:
         user_story_filename: str | None = None,
         manual_urls: list[str] | None = None,
     ) -> Dict[str, Any]:
+        self._execution_logs_context.set([])
         with self._pipeline_lock:
             self.execution_logs = []
             start_time = datetime.now()
@@ -214,6 +308,7 @@ class GenIAOrchestrator:
             llm_overrides = llm_overrides or {}
             manual_urls = manual_urls or []
 
+            heavy_stage_slot_acquired = False
             try:
                 _require_crawl4ai()
                 session = self._create_session(
@@ -231,6 +326,7 @@ class GenIAOrchestrator:
                     prompt_overrides=prompt_overrides,
                     llm_overrides=llm_overrides,
                 )
+                session["execution_logs"] = self.execution_logs
 
                 self.push_event(
                     "PIPELINE_START",
@@ -277,6 +373,8 @@ class GenIAOrchestrator:
                 refined_test = structured.model_copy(deep=True)
                 crawler_retry_errors: list[str] = []
 
+                self._acquire_heavy_stage_slot(pipeline_id)
+                heavy_stage_slot_acquired = True
                 for crawler_attempt in range(2):
                     crawler = AsyncWebCrawler(config=browser_config)
                     try:
@@ -374,6 +472,9 @@ class GenIAOrchestrator:
                         except Exception:
                             pass
 
+                self._heavy_stage_semaphore.release()
+                heavy_stage_slot_acquired = False
+
                 if crawler_retry_errors:
                     self.push_event("DEBUG", "logs", {"crawler_retry_errors": crawler_retry_errors[-2:]}, pipeline_id)
 
@@ -460,6 +561,8 @@ class GenIAOrchestrator:
                     "llm_overrides": llm_overrides,
                 }
             except Exception as exc:
+                if heavy_stage_slot_acquired:
+                    self._heavy_stage_semaphore.release()
                 self.push_event("PIPELINE_ERROR", "logs", {"error": str(exc), "traceback": traceback.format_exc()}, pipeline_id)
                 session = self._get_session(pipeline_id)
                 if session:
@@ -484,6 +587,8 @@ class GenIAOrchestrator:
             if not session:
                 self.push_event("PIPELINE_ERROR", "logs", {"error": "Pipeline session not found", "pipeline_id": pipeline_id})
                 raise ValueError("Pipeline session not found")
+
+            self._execution_logs_context.set(session.get("execution_logs", []))
 
             try:
                 self.push_event("PIPELINE_RESUME", "logs", {"pipeline_id": pipeline_id}, pipeline_id)

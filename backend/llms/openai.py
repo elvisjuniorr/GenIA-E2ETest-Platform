@@ -64,8 +64,14 @@ class OpenAIProvider:
         )
 
         request_options = {}
-        if model.startswith(("gpt-5.6", "gpt-5.4")):
-            # These reasoning models accept temperature when reasoning is disabled.
+        request_temperature = temperature
+        if model in {"gpt-5-mini", "gpt-5-nano"}:
+            # GPT-5 models before 5.1 do not support reasoning_effort="none";
+            # keep generation fast and omit temperature, which conflicts with
+            # an active reasoning mode in the Chat Completions API.
+            request_options["reasoning_effort"] = "low"
+            request_temperature = None
+        elif model.startswith(("gpt-5.6", "gpt-5.4")):
             request_options["reasoning_effort"] = "none"
 
         response = client.chat.completions.create(
@@ -76,7 +82,7 @@ class OpenAIProvider:
                     "content": prompt
                 }
             ],
-            temperature=temperature,
+            **({} if request_temperature is None else {"temperature": request_temperature}),
             **request_options,
         )
 

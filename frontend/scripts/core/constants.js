@@ -7,7 +7,7 @@
       STRUCTURED: "structured",
     },
     PROVIDER_MODELS: {
-      openai: ["gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna"],
+      openai: ["gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5-mini", "gpt-5-nano"],
       gemini: ["gemini-2.0-flash", "gemini-1.5-pro"],
       claude: ["claude-3-5-sonnet-latest", "claude-3-opus-latest"],
       cohere: ["command-r", "command-r-plus"],

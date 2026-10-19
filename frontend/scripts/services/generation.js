@@ -80,7 +80,23 @@
       1,
       session.pipelineId,
       session.promptOverrides || {},
-      session.llmOverrides || {}
+      session.llmOverrides || {},
+      (state, details) => {
+        const messages = {
+          queued: "Pipeline recebida. Preparando a execução.",
+          QUEUED: "Pipeline aguardando uma vaga de execução.",
+          RUNNING: "Pipeline em execução.",
+          WAITING_HEAVY_STAGE: "Aguardando uma vaga para extração/refinamento; até duas pipelines usam esses recursos ao mesmo tempo.",
+          EXTRACTION: "Extraindo elementos da página.",
+          REFINEMENT: "Refinando seletores.",
+          WAITING_VALIDATION: "Pipeline aguardando sua validação.",
+          COMPLETED: "Pipeline concluída.",
+        };
+        if (messages[state]) {
+          session.onStatus?.(state, messages[state], details);
+          session.onLog?.({ level: "info", stage: "pipeline", message: messages[state] });
+        }
+      }
     );
 
     if (!pipelineResult.success) {
@@ -127,7 +143,20 @@
       session.resumeFromStage || "confirmation",
       session.scriptOverride || null,
       session.promptOverrides || {},
-      session.llmOverrides || {}
+      session.llmOverrides || {},
+      (state, details) => {
+        const messages = {
+          queued: "Continuação recebida. Preparando a execução.",
+          QUEUED: "Continuação aguardando uma vaga de execução.",
+          RUNNING: "Continuação da pipeline em execução.",
+          WAITING_HEAVY_STAGE: "Aguardando uma vaga para extração/refinamento.",
+          COMPLETED: "Continuação concluída.",
+        };
+        if (messages[state]) {
+          session.onStatus?.(state, messages[state], details);
+          session.onLog?.({ level: "info", stage: "pipeline", message: messages[state] });
+        }
+      }
     );
 
     if (!continueResult.success) {
