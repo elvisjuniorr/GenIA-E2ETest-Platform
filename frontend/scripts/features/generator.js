@@ -2033,8 +2033,6 @@
       if (!viewer || !image || !frame?.image) return;
 
       image.src = `data:${frame.mime || "image/jpeg"};base64,${frame.image}`;
-      const status = byId("executionLiveStatus");
-      if (status) status.textContent = [frame.label, frame.url].filter(Boolean).join(" · ");
       viewer.classList.remove("hidden");
       activateResultTab("execution");
     };
@@ -2174,7 +2172,6 @@
             <div id="tab-execution" class="result-tab">
               <div class="report-shell">
                 <section id="executionLiveViewer" class="execution-live-viewer hidden" aria-live="polite">
-                  <div id="executionLiveStatus" class="execution-live-status"></div>
                   <img id="executionLiveImage" alt="" />
                 </section>
                 <div id="executionContent" class="report-host"></div>
