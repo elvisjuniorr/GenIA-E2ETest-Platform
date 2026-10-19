@@ -1595,9 +1595,9 @@
     };
 
     const getImageArtifactPaths = (...groups) =>
-      groups
+      [...new Set(groups
         .flat()
-        .filter((item) => typeof item === "string" && /\.(png|jpe?g|webp|gif)$/i.test(item));
+        .filter((item) => typeof item === "string" && /\.(png|jpe?g|webp|gif)$/i.test(item)))];
 
     const renderScreenshotGallery = (paths = [], container, title = "Screenshots") => {
       const list = Array.isArray(paths) ? paths.filter((path) => typeof path === "string" && path.trim()) : [];
@@ -1614,7 +1614,7 @@
         figure.href = artifactUrl(path);
         figure.target = "_blank";
         figure.rel = "noreferrer";
-        figure.innerHTML = `<img src="${artifactUrl(path)}" alt="screenshot" loading="lazy" /><span>${escapeHtml(path.split(/[\\/]/).pop())}</span>`;
+        figure.innerHTML = `<img src="${artifactUrl(path)}" alt="Screenshot da execução" loading="lazy" /><span>${escapeHtml(path.split(/[\\/]/).pop())}</span>`;
         grid?.appendChild(figure);
       });
 
@@ -1767,14 +1767,18 @@
     };
 
     const renderExecutionReport = (execution) => {
+      const liveViewer = byId("executionLiveViewer");
+      const liveImage = byId("executionLiveImage");
+      liveViewer?.classList.add("hidden");
+      liveImage?.removeAttribute("src");
       renderReportSection("executionContent", "Execução", execution, (value, container) => {
         const imageArtifacts = getImageArtifactPaths(
           value?.screenshots || [],
           value?.image_evidence || [],
           value?.evidence || [],
-          value?.test_results?.screenshots || []
+          value?.test_results?.screenshots || [],
+          value?.primary_screenshot || ""
         );
-        const primaryScreenshot = value?.primary_screenshot || imageArtifacts[0] || "";
 
         if (value.stdout) {
           const stdout = document.createElement("div");
@@ -1804,27 +1808,14 @@
           container.appendChild(logs);
         }
 
-        if (primaryScreenshot) {
-          const hero = document.createElement("div");
-          hero.className = "report-block";
-          hero.innerHTML = `
-            <h4>Screenshot de falha</h4>
-            <a class="screenshot-hero" href="${artifactUrl(primaryScreenshot)}" target="_blank" rel="noreferrer">
-              <img src="${artifactUrl(primaryScreenshot)}" alt="screenshot de falha" loading="lazy" />
-              <span>${escapeHtml(primaryScreenshot.split(/[\\/]/).pop())}</span>
-            </a>
-          `;
-          container.appendChild(hero);
-        }
-
         if (imageArtifacts.length) {
-          renderScreenshotGallery(imageArtifacts, container, "Screenshots");
+          renderScreenshotGallery(imageArtifacts, container, "SCREENSHOT");
         }
 
         if (value.evidence?.length) {
           renderArtifacts(value.evidence, "executionArtifacts", "Evidências");
         } else if (!imageArtifacts.length) {
-          renderArtifacts(value.screenshots || [], "executionArtifacts", "Screenshots");
+          renderArtifacts(value.screenshots || [], "executionArtifacts", "SCREENSHOT");
         }
 
         if (value.test_results) {

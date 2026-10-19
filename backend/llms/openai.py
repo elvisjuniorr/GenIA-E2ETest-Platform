@@ -56,7 +56,8 @@ class OpenAIProvider:
         api_key,
         model,
         prompt,
-        temperature=0.0
+        temperature=0.0,
+        response_format=None,
     ):
 
         client = OpenAI(
@@ -73,6 +74,8 @@ class OpenAIProvider:
             request_temperature = None
         elif model.startswith(("gpt-5.6", "gpt-5.4")):
             request_options["reasoning_effort"] = "none"
+        if response_format is not None:
+            request_options["response_format"] = response_format
 
         response = client.chat.completions.create(
             model=model,
@@ -100,7 +103,8 @@ class OpenAIProvider:
             api_key,
             model,
             prompt,
-            temperature=temperature
+            temperature=temperature,
+            response_format={"type": "json_object"},
         )
 
         try:
