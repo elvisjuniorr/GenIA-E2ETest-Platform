@@ -6,7 +6,7 @@ import html
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, List
@@ -251,7 +251,7 @@ def _is_crawl4ai_browser_lifecycle_error(exc: Exception) -> bool:
 
 
 def _iso_now() -> str:
-    return datetime.now().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _normalize_manual_changes(manual_changes: Any) -> dict[str, Any]:

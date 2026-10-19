@@ -56,6 +56,13 @@ def _write_console(message: str, *, stream: str = "stdout") -> None:
             pass
 
 
+def _parse_utc_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _configure_logging() -> None:
     root_logger = logging.getLogger()
     if not root_logger.handlers:
@@ -207,7 +214,7 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
             expired_ids = []
             for session_id, old_session in orchestrator.pipeline_sessions.items():
                 try:
-                    updated = datetime.fromisoformat(old_session.get("updated_at", "").replace("Z", "+00:00"))
+                    updated = _parse_utc_datetime(old_session.get("updated_at", ""))
                 except (TypeError, ValueError):
                     continue
                 if updated < now - timedelta(hours=2) and old_session.get("state") not in {"QUEUED", "RUNNING"}:
@@ -543,7 +550,7 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
         if not session:
             return jsonify({"status": "missing", "pipeline_id": pipeline_id}), 404
         try:
-            updated = datetime.fromisoformat(session.get("updated_at", "").replace("Z", "+00:00"))
+            updated = _parse_utc_datetime(session.get("updated_at", ""))
         except (TypeError, ValueError):
             updated = datetime.now(timezone.utc)
         if updated < datetime.now(timezone.utc) - timedelta(hours=2) and session.get("state") not in {"QUEUED", "RUNNING"}:
