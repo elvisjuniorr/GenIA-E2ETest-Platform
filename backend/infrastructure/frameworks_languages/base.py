@@ -150,18 +150,29 @@ class BaseExecutionStrategy(ABC):
             _visual_frame_count = 0
             _last_visual_frame_at = 0.0
 
-            def end_test(data, result):
-                if getattr(result, "status", "") != "FAIL":
-                    return
+            def _capture_execution_screenshot(data):
                 try:
                     from robot.libraries.BuiltIn import BuiltIn
-                    built_in = BuiltIn()
-                    try:
-                        built_in.run_keyword("Capture Page Screenshot")
-                    except Exception:
-                        built_in.run_keyword("Capture Screenshot")
+                    library = BuiltIn().get_library_instance("SeleniumLibrary")
+                    test_name = "".join(
+                        char if char.isalnum() or char in "-_" else "_"
+                        for char in str(getattr(data, "name", "test"))
+                    )[:60]
+                    screenshot_path = os.path.join(
+                        os.path.dirname(__file__),
+                        f"execution-{test_name or 'test'}.png",
+                    )
+                    library.capture_page_screenshot(screenshot_path)
                 except Exception:
                     pass
+
+            def start_keyword(data, result):
+                keyword_name = str(getattr(data, "name", "")).strip().lower()
+                if keyword_name in {"close browser", "close all browsers"}:
+                    _capture_execution_screenshot(data)
+
+            def end_test(data, result):
+                _capture_execution_screenshot(data)
 
             def end_keyword(data, result):
                 global _visual_frame_count, _last_visual_frame_at

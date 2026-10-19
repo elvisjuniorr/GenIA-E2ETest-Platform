@@ -836,20 +836,28 @@ def build_js_runtime(source_body: str, *, mode: str, browser_headless: bool = Tr
           globalThis.assertNotNull = (value, message) => assert.ok(value !== null && value !== undefined, message);
           globalThis.assertNull = (value, message) => assert.ok(value === null || value === undefined, message);
 
-          {body}
+          try {{
+            {body}
 
-          for (const testCase of testHooks.tests) {{
-            for (const hook of testHooks.beforeEach) {{
-              await runBlock('beforeEach', hook);
+            for (const testCase of testHooks.tests) {{
+              for (const hook of testHooks.beforeEach) {{
+                await runBlock('beforeEach', hook);
+              }}
+              await runBlock(testCase.name, testCase.fn);
+              for (const hook of testHooks.afterEach) {{
+                await runBlock('afterEach', hook);
+              }}
             }}
-            await runBlock(testCase.name, testCase.fn);
-            for (const hook of testHooks.afterEach) {{
-              await runBlock('afterEach', hook);
+
+            await cy.run();
+          }} finally {{
+            try {{
+              await page.screenshot({{ path: path.join(process.cwd(), 'execution-screenshot.png'), fullPage: true }});
+            }} catch (_) {{
+              // The final screenshot is optional evidence and must not mask test results.
             }}
+            await browser.close().catch(() => {{}});
           }}
-
-          await cy.run();
-          await browser.close();
         }}
 
         runScript().catch((error) => {{
