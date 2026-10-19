@@ -119,22 +119,23 @@
     }
 
     const hasChanges = manualChanges && Object.keys(manualChanges).length > 0;
-    if (!geniaAPI.activeLogStream) {
-      session.logStream = geniaAPI.streamPipelineLogs(session.pipelineId, {
-        onLog: (event) => {
-          if (event) {
-            session.onLog?.(event);
-          }
-        },
-        onError: (error) => {
-          session.onLog?.({
-            level: "error",
-            stage: "logs",
-            message: error?.message || "Erro no stream de logs",
-          });
-        },
-      });
-    }
+    // The phase-one stream can still be marked active for a short time after
+    // validation is ready. Always replace it so execution visual frames are
+    // subscribed to before the continuation request starts.
+    session.logStream = geniaAPI.streamPipelineLogs(session.pipelineId, {
+      onLog: (event) => {
+        if (event) {
+          session.onLog?.(event);
+        }
+      },
+      onError: (error) => {
+        session.onLog?.({
+          level: "error",
+          stage: "logs",
+          message: error?.message || "Erro no stream de logs",
+        });
+      },
+    });
 
     const continueResult = await geniaAPI.runFullPipeline2(
       session.pipelineId,
