@@ -3310,6 +3310,8 @@ label {
 }
 
 .execution-live-viewer {
+  display: flex;
+  flex-direction: column;
   margin: 0 0 1.25rem;
   overflow: hidden;
   border: 1px solid var(--border-color, #d8dee8);
@@ -3321,9 +3323,8 @@ label {
 .execution-live-viewer img {
   display: block;
   width: 100%;
-  height: min(70vh, 720px);
-  object-fit: contain;
-  object-position: center;
+  height: auto;
+  max-height: min(80vh, 900px);
   background: #0b1220;
 }
 
