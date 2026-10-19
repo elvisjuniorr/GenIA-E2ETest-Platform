@@ -66,6 +66,9 @@
     let promptBundle = {};
     let promptBundleFramework = "";
     let promptLoadToken = 0;
+    let pipelineExecutionStarted = false;
+    let pipelineQueueModalTimer = null;
+    let pipelineQueuePendingDetails = null;
 
     const loadPromptBundle = async (framework, inputMode = null) => {
       const currentToken = ++promptLoadToken;
@@ -201,6 +204,11 @@
       const channel = event?.channel || event?.payload?.channel;
       const payload = event?.payload || {};
       const stageKey = stageToResultKey[channel];
+
+      if (["STAGE_START", "MODULE_START", "STAGE_DONE", "PIPELINE_PAUSED", "PIPELINE_COMPLETED", "PIPELINE_ERROR"].includes(type)) {
+        pipelineExecutionStarted = true;
+        updatePipelineWaitModal("RUNNING");
+      }
 
       if (type === "STAGE_QUEUED" && channel === "extraction_refinement") {
         updatePipelineWaitModal(
@@ -1951,7 +1959,42 @@
 
       const waitingForPipeline = ["queued", "QUEUED"].includes(state);
       const waitingForHeavyStage = state === "WAITING_HEAVY_STAGE";
-      if (!waitingForPipeline && !waitingForHeavyStage) {
+
+      if (waitingForPipeline) {
+        if (pipelineExecutionStarted) {
+          if (pipelineQueueModalTimer !== null) {
+            window.clearTimeout(pipelineQueueModalTimer);
+            pipelineQueueModalTimer = null;
+          }
+          pipelineQueuePendingDetails = null;
+          modal.classList.remove("is-open");
+          modal.setAttribute("aria-hidden", "true");
+          return;
+        }
+        pipelineQueuePendingDetails = { message, details };
+        if (!modal.classList.contains("is-open") && pipelineQueueModalTimer === null) {
+          pipelineQueueModalTimer = window.setTimeout(() => {
+            pipelineQueueModalTimer = null;
+            if (!pipelineQueuePendingDetails) return;
+            const pending = pipelineQueuePendingDetails;
+            pipelineQueuePendingDetails = null;
+            updatePipelineWaitModal("SHOW_PIPELINE_QUEUE", pending.message, pending.details);
+          }, 2200);
+        }
+        return;
+      }
+
+      if (pipelineQueueModalTimer !== null) {
+        window.clearTimeout(pipelineQueueModalTimer);
+        pipelineQueueModalTimer = null;
+      }
+      pipelineQueuePendingDetails = null;
+
+      if (state === "SHOW_PIPELINE_QUEUE") {
+        // The API has reported QUEUED continuously long enough to confirm actual waiting.
+      } else if (waitingForHeavyStage) {
+        // Heavy-stage contention is real work waiting and should be shown immediately.
+      } else {
         modal.classList.remove("is-open");
         modal.setAttribute("aria-hidden", "true");
         return;
@@ -2448,6 +2491,7 @@
       if (!currentSession) return;
 
       try {
+        pipelineExecutionStarted = false;
         setStep(1, "running");
         addLog("Estruturando caso de teste...", "info");
         setValidationFeedback("Sua pipeline foi enviada e está sendo posicionada na fila de execução.", "info");
@@ -2484,6 +2528,9 @@
         showToast("Pipeline ID não encontrado", "error");
         return;
       }
+
+      updatePipelineWaitModal("RUNNING");
+      pipelineExecutionStarted = false;
 
       try {
         currentSession.scriptOverride = normalizeText(
