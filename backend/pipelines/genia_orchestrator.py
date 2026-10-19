@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import json
 import logging
 import queue
 import threading
@@ -233,7 +234,7 @@ class GenIAOrchestrator:
 
     def push_event(self, event_type: str, channel: str, payload: Any, pipeline_id: str | None = None):
         if isinstance(payload, dict):
-            message = payload.get("message") or payload.get("stage") or payload.get("channel") or event_type
+            message = payload.get("message") or payload.get("label") or payload.get("stage") or payload.get("channel") or event_type
         else:
             message = str(payload)
 
@@ -245,31 +246,34 @@ class GenIAOrchestrator:
             "payload": _json_safe(payload),
             "message": message,
         }
-        self.execution_logs.append(
-            {
-                "timestamp": event["timestamp"],
-                "level": self._get_level_from_event_type(event_type),
-                "message": message,
-                "stage": channel,
-                "type": self._get_level_from_event_type(event_type),
-                "event_type": event_type,
-            }
-        )
-        print(f"[EVENT:{event_type}][{channel}] {message}", flush=True)
+        is_visual_frame = event_type == "EXECUTION_VISUAL_FRAME"
+        if not is_visual_frame:
+            self.execution_logs.append(
+                {
+                    "timestamp": event["timestamp"],
+                    "level": self._get_level_from_event_type(event_type),
+                    "message": message,
+                    "stage": channel,
+                    "type": self._get_level_from_event_type(event_type),
+                    "event_type": event_type,
+                }
+            )
+            print(f"[EVENT:{event_type}][{channel}] {message}", flush=True)
 
         if pipeline_id:
             session = self._get_session(pipeline_id)
             if session:
-                session["history"].append(_build_timeline_payload(session, channel, event_type, payload))
-                session["timeline"].append(
-                    {
-                        "timestamp": event["timestamp"],
-                        "stage": channel,
-                        "event_type": event_type,
-                        "payload": _json_safe(payload),
-                    }
-                )
-                session["updated_at"] = _iso_now()
+                if not is_visual_frame:
+                    session["history"].append(_build_timeline_payload(session, channel, event_type, payload))
+                    session["timeline"].append(
+                        {
+                            "timestamp": event["timestamp"],
+                            "stage": channel,
+                            "event_type": event_type,
+                            "payload": _json_safe(payload),
+                        }
+                    )
+                    session["updated_at"] = _iso_now()
                 session["queue"].put(event)
 
         return event
@@ -581,6 +585,7 @@ class GenIAOrchestrator:
         script_override: str | None = None,
         prompt_overrides: Dict[str, str] | None = None,
         llm_overrides: Dict[str, Any] | None = None,
+        visualize_execution: bool = False,
     ) -> Dict[str, Any]:
         with self._pipeline_lock:
             session = self._get_session(pipeline_id)
@@ -600,6 +605,7 @@ class GenIAOrchestrator:
                 framework = session["data"].get("framework")
                 language = session["data"].get("language")
                 validation = session["data"].get("validation", {})
+                visualize_execution = bool(visualize_execution)
 
                 confirmed_script = original_script
                 confirmation_used_llm = False
@@ -648,16 +654,30 @@ class GenIAOrchestrator:
 
                 self._set_session_state(pipeline_id, PipelineStage.EXECUTION.value)
                 self.push_event("STAGE_START", "execution", {"framework": framework, "language": language}, pipeline_id)
-                execution_result = await ExecutionStageImpl(self.llm_provider, self.prompt_manager).run(
-                    confirmed_script,
-                    framework,
-                    language,
-                    log_callback=lambda level, message: self.push_event(
+
+                def emit_execution_feedback(level: str, message: str) -> None:
+                    if level == "visual":
+                        if not visualize_execution:
+                            return
+                        try:
+                            frame = json.loads(message)
+                        except (TypeError, ValueError):
+                            return
+                        self.push_event("EXECUTION_VISUAL_FRAME", "execution", frame, pipeline_id)
+                        return
+                    self.push_event(
                         "EXECUTION_LOG",
                         "execution",
                         {"level": level, "message": message},
                         pipeline_id,
-                    ),
+                    )
+
+                execution_result = await ExecutionStageImpl(self.llm_provider, self.prompt_manager).run(
+                    confirmed_script,
+                    framework,
+                    language,
+                    log_callback=emit_execution_feedback,
+                    visualize_execution=visualize_execution,
                 )
                 execution_artifacts = _compact_execution_artifacts(execution_result)
                 execution_payload = _model_dump(execution_result)

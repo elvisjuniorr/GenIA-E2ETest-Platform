@@ -72,8 +72,9 @@ class JUnitJavaExecutionStrategy(BaseExecutionStrategy):
         cwd: str,
         execution_log_lines: list[str],
         log_callback=None,
+        visualize_execution: bool = False,
     ) -> tuple[int, str, str]:
-        process = self._safe_process(command, cwd=cwd)
+        process = self._safe_process(command, cwd=cwd, visualize_execution=visualize_execution)
         stdout_text, stderr_text = self._stream_process(process, execution_log_lines, log_callback)
         return_code = process.wait(timeout=self.timeout_seconds)
         return return_code, stdout_text, stderr_text
@@ -89,6 +90,7 @@ class JUnitJavaExecutionStrategy(BaseExecutionStrategy):
         script: str,
         language: str | None = None,
         log_callback: Optional[Callable[[str, str], None]] = None,
+        visualize_execution: bool = False,
     ) -> ExecutionResult:
         start = time.time()
         execution_log_lines: list[str] = []
@@ -182,7 +184,13 @@ class JUnitJavaExecutionStrategy(BaseExecutionStrategy):
             execution_log_lines.append(f"[EXECUTION] Run step prepared using {java_executable}")
             self._emit(log_callback, "info", "Executando Java localmente")
 
-            run_rc, run_stdout, run_stderr = self._run_process(run_command, temp_dir, execution_log_lines, log_callback)
+            run_rc, run_stdout, run_stderr = self._run_process(
+                run_command,
+                temp_dir,
+                execution_log_lines,
+                log_callback,
+                visualize_execution,
+            )
             artifacts = self._collect_artifacts(temp_dir)
 
             combined_stdout = "\n".join(part for part in [compile_stdout, run_stdout] if part)

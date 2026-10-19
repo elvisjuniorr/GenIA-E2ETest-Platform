@@ -1687,7 +1687,7 @@ label {
 .validation-card-grid-list {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .validation-card {
@@ -2703,7 +2703,7 @@ label {
 }
 
 .validation-card-grid-list {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .validation-card,
@@ -2974,37 +2974,38 @@ label {
 }
 
 #promptsAccordion .pipeline-prompt {
-  display: flex;
-  justify-content: space-between;
-  align-items: stretch;
-  gap: 0.75rem;
-}
-
-#promptsAccordion .pipeline-prompt > div:first-child {
-  display: flex;
-  flex: 0 1 79%;
-  align-self: stretch;
-  width: 79% !important;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 24%);
+  grid-template-areas:
+    "heading llm"
+    "panel panel";
+  align-items: center;
+  gap: 0.75rem 1rem;
   min-width: 0;
+  padding: 0.85rem 1rem;
 }
 
 #promptsAccordion .pipeline-prompt .step-header {
+  grid-area: heading;
   display: flex;
-  align-self: stretch;
-  flex: 1 1 auto;
-  justify-content: flex-start;
-  min-height: 3rem;
-  height: 100%;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  min-height: 2.75rem;
   margin-bottom: 0;
   box-sizing: border-box;
 }
 
+#promptsAccordion .pipeline-prompt .step-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 #promptsAccordion .pipeline-prompt .prompt-stage-select {
-  flex: 0 1 22%;
-  align-self: center;
-  width: 22%;
-  min-width: 12rem;
-  max-width: 100%;
+  grid-area: llm;
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
   padding: 0 2.8rem 0 1rem;
   appearance: none;
   -webkit-appearance: none;
@@ -3034,25 +3035,12 @@ label {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
-@media (max-width: 600px) {
-  #promptsAccordion .pipeline-prompt .prompt-stage-select {
-    flex-basis: 100%;
-    width: 100%;
-    min-width: 0;
-  }
-}
-
-#promptsAccordion .pipeline-prompt:has(.prompt-panel:not(.hidden)) {
-  flex-wrap: wrap;
-}
-
-#promptsAccordion .pipeline-prompt:has(.prompt-panel:not(.hidden)) > div:first-child {
-  flex-basis: 100%;
-  width: 100% !important;
-}
-
 #promptsAccordion .pipeline-prompt .prompt-panel {
+  grid-area: panel;
+  align-self: stretch;
   width: 100%;
+  min-width: 0;
+  margin: 0;
   box-sizing: border-box;
 }
 
@@ -3244,3 +3232,181 @@ label {
   }
 }
 
+
+/* Optional live view of browser execution */
+.execution-visual-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  width: fit-content;
+  max-width: 100%;
+  margin: 1rem 0 1.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-color, #d8dee8);
+  border-radius: 12px;
+  background: var(--surface-color, #fff);
+  cursor: pointer;
+}
+
+.execution-visual-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.execution-visual-switch {
+  position: relative;
+  flex: 0 0 46px;
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  background: #b8c0cc;
+  transition: background-color 160ms ease;
+}
+
+.execution-visual-switch::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 20%);
+  content: "";
+  transition: transform 160ms ease;
+}
+
+.execution-visual-toggle input:checked + .execution-visual-switch {
+  background: var(--color-primary, #2563eb);
+}
+
+.execution-visual-toggle input:checked + .execution-visual-switch::after {
+  transform: translateX(20px);
+}
+
+.execution-visual-toggle input:focus-visible + .execution-visual-switch {
+  outline: 3px solid rgb(37 99 235 / 28%);
+  outline-offset: 2px;
+}
+
+.execution-visual-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.execution-visual-copy strong {
+  color: var(--text-primary, #172033);
+  font-size: 0.94rem;
+}
+
+.execution-visual-copy small {
+  max-width: 38rem;
+  color: var(--text-secondary, #64748b);
+  line-height: 1.4;
+}
+
+.execution-live-viewer {
+  margin: 0 0 1.25rem;
+  overflow: hidden;
+  border: 1px solid var(--border-color, #d8dee8);
+  border-radius: 12px;
+  background: #101827;
+  color: #f8fafc;
+}
+
+.execution-live-viewer img {
+  display: block;
+  width: 100%;
+  max-height: min(70vh, 720px);
+  min-height: 180px;
+  object-fit: contain;
+  background: #0b1220;
+}
+
+@media (max-width: 600px) {
+  .execution-visual-toggle {
+    width: 100%;
+  }
+
+}
+.execution-visual-toggle:has(input:disabled) {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.execution-visual-toggle input:disabled + .execution-visual-switch {
+  background: #cbd5e1;
+}
+
+@media (max-width: 640px) {
+  #promptsAccordion {
+    display: grid;
+    gap: 14px;
+  }
+
+  #promptsAccordion .pipeline-prompt {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "heading"
+      "llm"
+      "panel";
+    gap: 10px;
+    min-width: 0;
+    height: auto;
+    padding: 12px;
+  }
+
+  #promptsAccordion .pipeline-prompt .step-header {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-height: 2.25rem;
+  }
+
+  #promptsAccordion .pipeline-prompt .step-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 0.9rem;
+    letter-spacing: 0.03em;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  #promptsAccordion .pipeline-prompt .step-badge {
+    flex: 0 0 auto;
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  #promptsAccordion .pipeline-prompt .prompt-stage-select {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding-left: 12px;
+    font-size: 0.9rem;
+  }
+
+  #promptsAccordion .pipeline-prompt .prompt-panel {
+    align-self: stretch;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface-2);
+    box-sizing: border-box;
+  }
+
+  #promptsAccordion .pipeline-prompt .prompt-textarea {
+    min-height: 180px;
+    resize: vertical;
+  }
+
+  #promptsAccordion .pipeline-prompt .step-actions {
+    justify-content: flex-end;
+    margin-top: 10px;
+  }
+}

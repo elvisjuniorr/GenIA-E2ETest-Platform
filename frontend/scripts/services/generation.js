@@ -156,7 +156,8 @@
           session.onStatus?.(state, messages[state], details);
           session.onLog?.({ level: "info", stage: "pipeline", message: messages[state] });
         }
-      }
+      },
+      Boolean(session.visualizeExecution)
     );
 
     if (!continueResult.success) {

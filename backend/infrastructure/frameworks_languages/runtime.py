@@ -322,6 +322,80 @@ def build_js_runtime(source_body: str, *, mode: str, browser_headless: bool = Tr
         const {{ chromium }} = pw;
         const CHROME_PATH = {chrome_path};
         const HEADLESS = {str(browser_headless).lower()};
+        const VISUALIZE_EXECUTION = process.env.GENIA_VISUALIZE_EXECUTION === '1';
+        let visualFrameCount = 0;
+        let visualFrameBusy = false;
+        const VISUAL_ACTION_LABELS = {{
+          goto: 'Abrindo página',
+          reload: 'Recarregando página',
+          goBack: 'Voltando página',
+          goForward: 'Avançando página',
+          click: 'Clicando em elemento',
+          dblclick: 'Clicando duas vezes em elemento',
+          fill: 'Preenchendo campo',
+          type: 'Digitando em campo',
+          selectOption: 'Selecionando opção',
+          check: 'Marcando opção',
+          uncheck: 'Desmarcando opção',
+          press: 'Interagindo com campo',
+        }};
+
+        async function emitVisualFrame(page, label) {{
+          if (!VISUALIZE_EXECUTION || visualFrameCount >= 60 || visualFrameBusy) return;
+          visualFrameBusy = true;
+          try {{
+            const image = await page.screenshot({{ type: 'jpeg', quality: 38, animations: 'disabled' }});
+            let url = '';
+            try {{
+              const current = new URL(page.url());
+              url = current.origin + current.pathname;
+            }} catch (_) {{}}
+            const frame = {{ image: image.toString('base64'), label, url }};
+            process.stdout.write('\\n__GENIA_VISUAL__' + JSON.stringify(frame) + '\\n');
+            visualFrameCount += 1;
+          }} catch (_) {{
+            // A screenshot is optional feedback and must never fail the test.
+          }} finally {{
+            visualFrameBusy = false;
+          }}
+        }}
+
+        function wrapVisualLocator(locator, page) {{
+          if (!VISUALIZE_EXECUTION || !locator) return locator;
+          return new Proxy(locator, {{
+            get(target, property) {{
+              const member = Reflect.get(target, property, target);
+              if (typeof member !== 'function') return member;
+              const label = VISUAL_ACTION_LABELS[String(property)];
+              if (label) return async (...args) => {{
+                const result = await member.apply(target, args);
+                await emitVisualFrame(page, label);
+                return result;
+              }};
+              if (['first', 'last', 'nth', 'locator', 'filter'].includes(String(property))) {{
+                return (...args) => wrapVisualLocator(member.apply(target, args), page);
+              }}
+              return member.bind(target);
+            }},
+          }});
+        }}
+
+        function enableVisualFeedback(page) {{
+          if (!VISUALIZE_EXECUTION) return;
+          for (const name of ['goto', 'reload', 'goBack', 'goForward']) {{
+            const original = page[name]?.bind(page);
+            if (!original) continue;
+            page[name] = async (...args) => {{
+              const result = await original(...args);
+              await emitVisualFrame(page, VISUAL_ACTION_LABELS[name]);
+              return result;
+            }};
+          }}
+          for (const name of ['locator', 'getByRole', 'getByText', 'getByLabel', 'getByPlaceholder', 'getByTestId', 'getByAltText', 'getByTitle']) {{
+            const original = page[name]?.bind(page);
+            if (original) page[name] = (...args) => wrapVisualLocator(original(...args), page);
+          }}
+        }}
 
         function isLocator(value) {{
           return value && typeof value.click === 'function' && typeof value.waitFor === 'function';
@@ -701,6 +775,7 @@ def build_js_runtime(source_body: str, *, mode: str, browser_headless: bool = Tr
 
         async function runScript() {{
           const {{ browser, context, page }} = await createBrowser();
+          enableVisualFeedback(page);
           const cy = createCy(page);
           const selenium = createSeleniumShim(page);
           const testHooks = {{

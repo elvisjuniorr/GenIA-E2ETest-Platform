@@ -21,6 +21,13 @@ class TestExecutor:
         script: str,
         language: str | None = None,
         log_callback: Optional[Callable[[str, str], None]] = None,
+        visualize_execution: bool = False,
     ) -> ExecutionResult:
         strategy = self.resolve_strategy(framework, language, script)
-        return strategy.execute(framework, script, language=language, log_callback=log_callback)
+        return strategy.execute(
+            framework,
+            script,
+            language=language,
+            log_callback=log_callback,
+            visualize_execution=visualize_execution,
+        )

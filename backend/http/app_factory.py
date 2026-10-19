@@ -485,6 +485,7 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
                 script_override=data.get("script_override"),
                 prompt_overrides=data.get("prompt_overrides"),
                 llm_overrides=data.get("llm_overrides"),
+                visualize_execution=data.get("visualize_execution") is True,
             ))
 
         accepted, reason = submit_pipeline(pipeline_id, run_job)

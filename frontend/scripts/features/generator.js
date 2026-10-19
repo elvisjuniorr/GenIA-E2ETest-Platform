@@ -199,11 +199,25 @@
     };
 
     const handlePipelineEvent = (event) => {
-      addLog(event);
       const type = event?.type;
       const channel = event?.channel || event?.payload?.channel;
       const payload = event?.payload || {};
       const stageKey = stageToResultKey[channel];
+
+      if (type === "EXECUTION_VISUAL_FRAME") {
+        renderExecutionVisualFrame(payload);
+        return;
+      }
+
+      if (
+        type === "EXECUTION_LOG" &&
+        channel === "execution" &&
+        !currentSession?.visualizeExecution
+      ) {
+        return;
+      }
+
+      addLog(event);
 
       if (["STAGE_START", "MODULE_START", "STAGE_DONE", "PIPELINE_PAUSED", "PIPELINE_COMPLETED", "PIPELINE_ERROR"].includes(type)) {
         pipelineExecutionStarted = true;
@@ -450,21 +464,19 @@
         const card = document.createElement("div");
         card.className = "pipeline-step pipeline-prompt";
         card.innerHTML = `
-          <div style="display:flex; flex-direction: column; gap: 1rem; width: 79%" >
-            <div class="step-header">
-              <span class="step-name">${stageLabelMap[stage] || stage}</span>
-              <span class="step-badge" id="${stage}Badge">Padrão</span>
-            </div>
-            <div class="prompt-panel hidden" id="${stage}PromptWrap">
-              <textarea id="${stage}Prompt" class="prompt-textarea" rows="8"></textarea>
-              <div class="step-actions">
-                <button type="button" class="btn-secondary btn-small" data-restore-prompt="${stage}">Restaurar padrão</button>
-              </div>
+          <div class="step-header">
+            <span class="step-name">${stageLabelMap[stage] || stage}</span>
+            <span class="step-badge" id="${stage}Badge">Padrão</span>
+          </div>
+          <select id="${stage}LlmSelect" class="prompt-stage-select" data-stage-llm-select="${stage}">
+            ${buildLLMSelectOptions()}
+          </select>
+          <div class="prompt-panel hidden" id="${stage}PromptWrap">
+            <textarea id="${stage}Prompt" class="prompt-textarea" rows="8"></textarea>
+            <div class="step-actions">
+              <button type="button" class="btn-secondary btn-small" data-restore-prompt="${stage}">Restaurar padrão</button>
             </div>
           </div>
-            <select id="${stage}LlmSelect" class="prompt-stage-select" data-stage-llm-select="${stage}">
-              ${buildLLMSelectOptions()}
-            </select>
         `;
 
         card.querySelector(".step-header")?.addEventListener("click", () => {
@@ -767,7 +779,7 @@
         payload.user_response = notes;
       }
 
-      const manualInputs = qsa("#validationEditableFields .validation-edit-card")
+      const manualInputs = qsa("#validationDetectedInputs .validation-edit-card")
         .map((card) => {
           const name = card.dataset.name || "";
           const current = card.dataset.current || "";
@@ -907,16 +919,13 @@
     const renderValidationCards = (payload) => {
       const data = normalizeValidationItems(payload?.validation || payload);
       const detectedContainer = byId("validationDetectedInputs");
-      const editableContainer = byId("validationEditableFields");
       const summaryContainer = byId("validationSummary");
 
       if (summaryContainer) {
         const totalDetected = data.detected_inputs.length;
-        const totalEditable = data.editable_fields.length;
         summaryContainer.innerHTML = `
           <div class="report-summary-grid">
             <div class="report-metric"><span>Variáveis detectadas</span><strong>${escapeHtml(String(totalDetected))}</strong></div>
-            <div class="report-metric"><span>Campos editáveis</span><strong>${escapeHtml(String(totalEditable))}</strong></div>
           </div>
         `;
       }
@@ -945,9 +954,7 @@
                 <div><span>Obrigatoriedade</span><strong>${escapeHtml(required)}</strong></div>
               </div>`
             : "";
-          const editableInput = mode === "Editável"
-            ? `<div class="validation-edit-field"><label>Novo valor</label><input class="validation-edit-value" type="text" value="${escapeHtml(prettyValue(value))}" placeholder="Digite o novo valor" /></div>`
-            : "";
+          const editableInput = `<div class="validation-edit-field"><label>Novo valor</label><input class="validation-edit-value" type="text" value="${escapeHtml(prettyValue(value))}" placeholder="Digite o novo valor" /></div>`;
           const relatedStepsPreview = mode === "Detectada"
             ? `<div class="validation-card-steps">
                 <span class="validation-card-label">Passos relacionados</span>
@@ -955,7 +962,7 @@
               </div>`
             : "";
           return `
-            <article class="validation-card validation-${mode.toLowerCase()}-card${mode === "Editável" ? " validation-edit-card" : ""}" data-name="${escapeHtml(name)}" data-current="${escapeHtml(prettyValue(value))}">
+            <article class="validation-card validation-${mode.toLowerCase()}-card validation-edit-card" data-name="${escapeHtml(name)}" data-current="${escapeHtml(prettyValue(value))}">
               <div class="validation-card-head">
                 <div>
                   <div class="validation-card-title">${escapeHtml(name)}</div>
@@ -972,7 +979,6 @@
       };
 
       renderCardList(detectedContainer, data.detected_inputs, "Detectada");
-      renderCardList(editableContainer, data.editable_fields, "Editável");
     };
 
     const sanitizeModuleTreeForDisplay = (value) => {
@@ -2029,6 +2035,17 @@
       renderArtifacts(artifacts, "executionArtifacts", artifacts.length ? "Artefatos de execução" : "Artefatos");
     };
 
+    const renderExecutionVisualFrame = (frame) => {
+      if (!currentSession?.visualizeExecution) return;
+      const viewer = byId("executionLiveViewer");
+      const image = byId("executionLiveImage");
+      if (!viewer || !image || !frame?.image) return;
+
+      image.src = `data:${frame.mime || "image/jpeg"};base64,${frame.image}`;
+      viewer.classList.remove("hidden");
+      activateResultTab("execution");
+    };
+
     const buildTabContent = () =>
       RESULT_TABS.map((tab) => {
         if (["restructure", "extraction", "refinement"].includes(tab.key)) {
@@ -2057,6 +2074,16 @@
         }
 
         if (tab.key === "validation") {
+          const visualFramework = String(currentSession?.framework || "").toLowerCase();
+          const visualLanguage = String(currentSession?.language || "").toLowerCase();
+          const visualSupported =
+            (visualFramework.includes("robot") && visualLanguage === "python") ||
+            (["playwright", "cypress"].some((name) => visualFramework.includes(name)) && ["javascript", "typescript"].includes(visualLanguage)) ||
+            (visualFramework.includes("selenium") && ["javascript", "typescript"].includes(visualLanguage));
+          const visualToggleDisabled = visualSupported ? "" : "disabled";
+          const visualDescription = visualSupported
+            ? "Mostra capturas ao vivo enquanto o navegador abre páginas e interage com os elementos."
+            : "A visualização ao vivo não está disponível para esta combinação de framework e linguagem.";
           return `
             <div id="tab-validation" class="result-tab">
               <div id="validationFeedback" class="status-banner hidden"></div>
@@ -2064,18 +2091,17 @@
                 <button type="button" class="btn-primary btn-primary-inline" data-action="continue-no-changes">Continuar sem alterações</button>
                 <button type="button" class="btn-primary btn-primary-inline" data-action="continue-pipeline">Aplicar alterações e continuar</button>
               </div>
+              <label class="execution-visual-toggle" for="visualizeExecutionToggle">
+                <input type="checkbox" id="visualizeExecutionToggle" ${visualToggleDisabled} />
+                <span class="execution-visual-switch" aria-hidden="true"></span>
+                <span class="execution-visual-copy"><strong>Visualizar execução do teste</strong><small>${visualDescription}</small></span>
+              </label>
               <div id="validationSummary"></div>
               <div class="validation-section">
                 <div class="validation-section-header">
                   <h4>Variáveis detectadas</h4>
                 </div>
                 <div id="validationDetectedInputs" class="validation-card-grid-list"></div>
-              </div>
-              <div class="validation-section">
-                <div class="validation-section-header">
-                  <h4>Campos editáveis</h4>
-                </div>
-                <div id="validationEditableFields" class="validation-card-grid-list"></div>
               </div>
               <div class="form-group">
                 <label for="validationUserResponse">Resposta do usuário</label>
@@ -2154,6 +2180,9 @@
           return `
             <div id="tab-execution" class="result-tab">
               <div class="report-shell">
+                <section id="executionLiveViewer" class="execution-live-viewer hidden" aria-live="polite">
+                  <img id="executionLiveImage" alt="" />
+                </section>
                 <div id="executionContent" class="report-host"></div>
                 <div id="executionArtifacts" class="report-host"></div>
               </div>
@@ -2533,6 +2562,13 @@
       pipelineExecutionStarted = false;
 
       try {
+        currentSession.visualizeExecution = byId("visualizeExecutionToggle")?.checked === true;
+        const liveViewer = byId("executionLiveViewer");
+        liveViewer?.classList.add("hidden");
+        if (currentSession.visualizeExecution) {
+          const image = byId("executionLiveImage");
+          if (image) image.removeAttribute("src");
+        }
         currentSession.scriptOverride = normalizeText(
           byId("confirmationScriptEditor")?.value ||
             byId("confirmationContent")?.textContent ||

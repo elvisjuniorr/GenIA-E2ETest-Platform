@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+import json
 import os
 import re
 import shutil
@@ -70,6 +71,34 @@ class BaseExecutionStrategy(ABC):
                 return
             for line in iter(stream.readline, ""):
                 clean = line.rstrip("\n")
+                marker = "__GENIA_VISUAL__"
+                marker_index = clean.find(marker)
+                if marker_index >= 0:
+                    before = clean[:marker_index].strip()
+                    if before:
+                        store.append(before)
+                        execution_log_lines.append(f"[{prefix}] {before}")
+                        self._emit(callback, level, before)
+
+                    encoded_frame = clean[marker_index + len(marker):].lstrip()
+                    try:
+                        frame, consumed = json.JSONDecoder().raw_decode(encoded_frame)
+                    except (TypeError, ValueError):
+                        frame = None
+                        consumed = len(encoded_frame)
+                    if isinstance(frame, dict):
+                        self._emit(
+                            callback,
+                            "visual",
+                            json.dumps(frame, ensure_ascii=True, separators=(",", ":")),
+                        )
+                    after = encoded_frame[consumed:].strip()
+                    if after:
+                        store.append(after)
+                        execution_log_lines.append(f"[{prefix}] {after}")
+                        self._emit(callback, level, after)
+                    continue
+
                 store.append(clean)
                 execution_log_lines.append(f"[{prefix}] {clean}")
                 self._emit(callback, level, clean)
@@ -112,6 +141,15 @@ class BaseExecutionStrategy(ABC):
             """
             ROBOT_LISTENER_API_VERSION = 3
 
+            import base64
+            import json
+            import os
+            import sys
+            import time
+
+            _visual_frame_count = 0
+            _last_visual_frame_at = 0.0
+
             def end_test(data, result):
                 if getattr(result, "status", "") != "FAIL":
                     return
@@ -124,6 +162,34 @@ class BaseExecutionStrategy(ABC):
                         built_in.run_keyword("Capture Screenshot")
                 except Exception:
                     pass
+
+            def end_keyword(data, result):
+                global _visual_frame_count, _last_visual_frame_at
+                if os.environ.get("GENIA_VISUALIZE_EXECUTION") != "1" or _visual_frame_count >= 100:
+                    return
+                now = time.monotonic()
+                if now - _last_visual_frame_at < 0.3:
+                    return
+                try:
+                    from robot.libraries.BuiltIn import BuiltIn
+                    library = BuiltIn().get_library_instance("SeleniumLibrary")
+                    screenshot_path = os.path.join(os.path.dirname(__file__), "execution-live.png")
+                    library.capture_page_screenshot(screenshot_path)
+                    with open(screenshot_path, "rb") as screenshot:
+                        image = base64.b64encode(screenshot.read()).decode("ascii")
+                    event = {
+                        "image": image,
+                        "mime": "image/png",
+                        "label": str(getattr(data, "name", "Interagindo com a página"))[:100],
+                    }
+                    line = "__GENIA_VISUAL__" + json.dumps(event, ensure_ascii=True, separators=(",", ":")) + "\\n"
+                    output = getattr(sys, "__stdout__", None) or sys.stdout
+                    output.write(line)
+                    output.flush()
+                    _visual_frame_count += 1
+                    _last_visual_frame_at = now
+                except Exception:
+                    return
             """
         ).strip()
         listener_path = os.path.join(directory, "genia_failure_listener.py")
@@ -166,14 +232,16 @@ class BaseExecutionStrategy(ABC):
             env.setdefault("CHROME_BIN", chrome_binary)
         return env
 
-    def _safe_process(self, command: list[str], cwd: str) -> subprocess.Popen[str]:
+    def _safe_process(self, command: list[str], cwd: str, *, visualize_execution: bool = False) -> subprocess.Popen[str]:
+        env = self._build_env()
+        env["GENIA_VISUALIZE_EXECUTION"] = "1" if visualize_execution else "0"
         return subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             cwd=cwd,
-            env=self._build_env(),
+            env=env,
         )
 
     def _result(
@@ -261,6 +329,7 @@ class BaseExecutionStrategy(ABC):
         script: str,
         language: str | None = None,
         log_callback: Optional[LogCallback] = None,
+        visualize_execution: bool = False,
     ) -> ExecutionResult:
         start = time.time()
         execution_log_lines: list[str] = []
@@ -281,7 +350,7 @@ class BaseExecutionStrategy(ABC):
             execution_log_lines.append(f"[EXECUTION] Command: {' '.join(command)}")
             self._emit(log_callback, "info", f"Executando {' '.join(command)}")
 
-            process = self._safe_process(command, cwd=temp_dir)
+            process = self._safe_process(command, cwd=temp_dir, visualize_execution=visualize_execution)
             stdout_text, stderr_text = self._stream_process(process, execution_log_lines, log_callback)
             return_code = process.wait(timeout=self.timeout_seconds)
             artifacts = self._collect_artifacts(temp_dir)
