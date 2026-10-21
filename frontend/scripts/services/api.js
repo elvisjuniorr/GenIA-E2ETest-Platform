@@ -266,7 +266,8 @@
       llmOverrides = null,
       onStatus = null,
       visualizeExecution = false,
-      llmConfig = null
+      llmConfig = null,
+      sessionContext = null
     ) {
       const payload = {
         pipeline_id: pipelineId,
@@ -278,6 +279,7 @@
         llm_overrides: llmOverrides || undefined,
         visualize_execution: Boolean(visualizeExecution),
         llm_config: llmConfig || undefined,
+        session_context: sessionContext || undefined,
       };
       return this.submitPipeline("/pipeline/continue-after-validation", payload, onStatus);
     }

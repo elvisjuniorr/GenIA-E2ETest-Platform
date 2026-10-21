@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict
 
 from backend.domain.models import ExecutionResult
@@ -11,6 +12,55 @@ from ..shared import _append_context_block, _compact_execution_artifacts, _json_
 
 
 class HomologationStage(PipelineStageRunner):
+    @staticmethod
+    def _enforce_execution_facts(result: Any, execution_result: ExecutionResult, script: str) -> Any:
+        if not isinstance(result, dict):
+            return result
+
+        metadata = execution_result.test_results or {}
+        phase = metadata.get("execution_phase")
+        source_hash = metadata.get("source_script_sha256")
+        supplied_hash = hashlib.sha256(script.encode("utf-8")).hexdigest()
+        if source_hash and source_hash != supplied_hash:
+            phase = "script_mismatch"
+
+        if execution_result.status == "passed" and phase != "script_mismatch":
+            return result
+
+        result["homologation_status"] = "FAILED"
+        if phase == "script_validation":
+            framework = str(execution_result.framework or "executor").casefold()
+            runner_name = "Robot Framework" if framework == "robotframework" else "o executor"
+            detail = execution_result.stderr or execution_result.stacktrace or f"{runner_name} rejeitou o script na pré-validação."
+            result.update({
+                "execution_analysis": "A pré-validação do script falhou antes de o runner iniciar os passos do teste. Nenhuma interação com a interface (quando aplicável) nem asserção de negócio foi executada.",
+                "logs_analysis": f"Falha na fase script_validation. {runner_name} rejeitou o script antes da execução do teste. Diagnóstico registrado: {detail[:1800]}",
+                "success_rate": "0%: o teste não chegou a executar seus passos.",
+                "failure_count": "1",
+                "probable_cause": detail[:1800],
+                "broken_elements": "Não avaliados; o teste não chegou à interação com a interface.",
+                "selector_issues": "Não avaliados; o teste não chegou à interação com elementos.",
+                "invalid_fields": "Não avaliados; nenhum formulário foi preenchido.",
+                "execution_time": f"{execution_result.duration:.2f} segundos; falha durante a pré-validação.",
+                "executed_steps": f"Preparação e pré-validação do script por {runner_name}.",
+                "failed_steps": "A pré-validação rejeitou o script. Nenhum passo do teste foi executado.",
+                "improvement_suggestions": "Corrigir o erro de sintaxe indicado pelo Robot Framework e executar novamente. A pré-validação do script deve passar antes da análise de seletores ou do comportamento da interface.",
+                "general_recommendations": "Usar os diagnósticos da pré-validação como fonte da causa técnica e não inferir problemas de interface antes de o navegador iniciar.",
+                "final_conclusion": "Execução reprovada antes do início dos passos do teste. O resultado não valida o comportamento funcional e não deve ser aprovado como teste executado.",
+            })
+        else:
+            detail = execution_result.stderr or execution_result.stacktrace or "A execução terminou sem status PASSED."
+            result["failed_steps"] = result.get("failed_steps") or detail[:1800]
+            result["probable_cause"] = result.get("probable_cause") or detail[:1800]
+            result["final_conclusion"] = result.get("final_conclusion") or "Execução reprovada; consulte os diagnósticos do executor antes de aprovar o teste."
+            result["success_rate"] = result.get("success_rate") or "Não foi possível confirmar sucesso; a execução terminou com falha."
+
+        if phase == "script_mismatch":
+            result["homologation_status"] = "FAILED"
+            result["probable_cause"] = "O hash do script recebido pela Homologação não corresponde ao script de origem registrado pelo executor; não há evidência de que o relatório analisou o mesmo script executado."
+            result["final_conclusion"] = "Homologação reprovada por divergência de proveniência. Reexecute a pipeline com o script confirmado e correlacione o relatório ao hash registrado pelo executor."
+        return result
+
     async def run(
         self,
         current_provider: str,
@@ -85,6 +135,7 @@ class HomologationStage(PipelineStageRunner):
                     "validation": validation_data,
                     "manual_changes": manual_changes,
                     "script": script,
+                    "script_provenance": (execution_result.test_results or {}),
                 },
             ),
             {
@@ -96,10 +147,11 @@ class HomologationStage(PipelineStageRunner):
                 "validation_data": validation_data,
                 "manual_changes": manual_changes,
                 "generated_script": script,
+                "script_provenance": (execution_result.test_results or {}),
             },
         )
         result = self.llm.generate_json(api_key, model, final_prompt, temperature=temperature)
-        return _json_safe(result)
+        return self._enforce_execution_facts(_json_safe(result), execution_result, script)
 
 
 __all__ = ["HomologationStage"]

@@ -88,6 +88,7 @@ HARD REQUIREMENTS
 * Generate a script for SeleniumLibrary running the test in the backend's Linux browser runtime.
 * Assume the application under test is reachable at the URL supplied in the test case; do not assume it runs on the same machine as the browser.
 * Use standard SeleniumLibrary keywords and a minimal browser setup, such as `Open Browser    ${URL}    chrome`, with `Close All Browsers` as suite teardown.
+* Open one browser for each test case. Reuse that browser with `Go To` when the test visits another URL; do not open an additional browser for each page or step.
 * Do not create a custom Chrome binary path or set `binary_location`; the execution runtime selects the installed browser and its driver.
 * Do not add local desktop display settings, remote WebDriver URLs, Selenium Grid configuration, or operating-system-specific paths.
 * Do not force visible browser mode. The execution runtime may run Chrome headlessly and supplies its required container launch flags.
@@ -101,6 +102,13 @@ HARD REQUIREMENTS
 * Keep the test self-contained and executable.
 * Prefer a simple suite setup with direct SeleniumLibrary usage rather than custom helper keywords.
 * Never generate raw backslashes inside JSON strings; when returning code in JSON, all backslashes must be escaped correctly.
+
+ROBOT VARIABLES SECTION SYNTAX (CRITICAL)
+
+* In `*** Variables ***`, separate each variable name from its value with at least two spaces (prefer four) or a tab. Never use a single space as the separator.
+* Use variable names without spaces, preferably UPPER_SNAKE_CASE, such as `${INVALID_PASSWORD}`.
+* Keep each declaration as a valid Robot Framework data cell, for example `${INVALID_PASSWORD}    invalid_password`.
+* Before returning the script, inspect every variable declaration for the required separator and ensure each referenced variable is declared.
 
 OUTPUT REQUIREMENTS
 

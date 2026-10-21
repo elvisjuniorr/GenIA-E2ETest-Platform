@@ -159,14 +159,35 @@
         }
       },
       Boolean(session.visualizeExecution),
-      session.completed && session.llmConfig
+      session.llmConfig
         ? {
             provider: session.llmConfig.provider,
-            api_key: decodeApiKey(session.llmConfig.apiKey || session.llmConfig.api_key),
+            api_key: decodeApiKey(session.llmConfig.apiKey || session.llmConfig.api_key || ""),
             model: session.llmConfig.model,
             temperature: session.llmConfig.temperature ?? 0,
           }
-        : null
+        : null,
+      {
+        initial_input: session.testDescription || "",
+        test_case: session.testDescription || "",
+        input_mode: session.backendInputMode || session.inputMode || "test_case",
+        user_story_content: session.userStoryContent || null,
+        user_story_filename: session.userStoryFilename || null,
+        manual_urls: session.manualUrls || session.urls || [],
+        test_name: session.testName || "untitled",
+        framework: session.framework,
+        language: session.language,
+        headless: true,
+        attempt: 1,
+        pipeline_id: session.pipelineId,
+        structured: session.results?.structured || {},
+        extracted: session.results?.extracted || {},
+        refined: session.results?.refined || {},
+        script: session.results?.confirmed_script || session.results?.script || "",
+        validation: session.results?.validation || {},
+        prompt_overrides: session.promptOverrides || {},
+        llm_overrides: session.llmOverrides || {},
+      }
     );
 
     if (!continueResult.success) {

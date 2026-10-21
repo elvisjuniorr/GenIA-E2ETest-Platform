@@ -786,6 +786,8 @@ class GenIAOrchestrator:
                     temperature=None,
                     prompt_override=prompt_overrides.get("refactoring"),
                     llm_override=llm_overrides.get("refactoring"),
+                    framework=framework,
+                    language=language,
                 )
 
                 if not isinstance(refactoring, dict):

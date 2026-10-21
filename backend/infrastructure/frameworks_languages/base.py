@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+import hashlib
 import json
 import os
 import re
@@ -24,11 +25,22 @@ from backend.domain.models import ExecutionResult
 LogCallback = Callable[[str, str], None]
 
 
+class ExecutionPreflightError(Exception):
+    """Framework-neutral failure raised before a test runner starts the test."""
+
+    def __init__(self, message: str, *, stdout: str = "", stderr: str = "", phase: str = "script_validation") -> None:
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
+        self.phase = phase
+
+
 class BaseExecutionStrategy(ABC):
     framework_name: str = ""
     supported_languages: tuple[str, ...] = ()
     default_language: str = "python"
     timeout_seconds: int = 600
+    supports_candidate_validation: bool = False
 
     def _python_command(self) -> str:
         return sys.executable or "python"
@@ -173,6 +185,18 @@ class BaseExecutionStrategy(ABC):
 
             def end_test(data, result):
                 _capture_execution_screenshot(data)
+                _close_all_browsers()
+
+            def end_suite(data, result):
+                _close_all_browsers()
+
+            def _close_all_browsers():
+                try:
+                    from robot.libraries.BuiltIn import BuiltIn
+                    library = BuiltIn().get_library_instance("SeleniumLibrary")
+                    library.close_all_browsers()
+                except Exception:
+                    pass
 
             def end_keyword(data, result):
                 global _visual_frame_count, _last_visual_frame_at
@@ -267,6 +291,7 @@ class BaseExecutionStrategy(ABC):
         execution_log_lines: list[str],
         artifacts: list[str],
         command: list[str],
+        execution_metadata: dict | None = None,
     ) -> ExecutionResult:
         screenshots = [path for path in artifacts if Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}]
         traces = [path for path in artifacts if Path(path).suffix.lower() == ".trace"]
@@ -293,6 +318,7 @@ class BaseExecutionStrategy(ABC):
                 "duration_seconds": round(time.time() - start, 2),
                 "framework": framework,
                 "language": language,
+                **(execution_metadata or {}),
             },
             framework=framework,
             runtime=self._default_runtime(command),
@@ -305,17 +331,21 @@ class BaseExecutionStrategy(ABC):
         start: float,
         execution_log_lines: list[str],
         message: str,
+        stdout_text: str = "",
+        stderr_text: str | None = None,
+        execution_metadata: dict | None = None,
     ) -> ExecutionResult:
         execution_log_lines.append(f"[ERROR] {message}")
         return ExecutionResult(
-            stdout="",
-            stderr=message,
+            stdout=stdout_text,
+            stderr=stderr_text if stderr_text is not None else message,
             status="error",
             duration=time.time() - start,
             execution_log_lines=execution_log_lines,
             stacktrace=traceback.format_exc(),
             framework=framework,
             runtime=framework,
+            test_results=execution_metadata,
         )
 
     def resolve_script_path(self, temp_dir: str, filename: str) -> str:
@@ -326,6 +356,40 @@ class BaseExecutionStrategy(ABC):
 
     def normalize_script(self, script: str, language: str | None = None) -> str:
         return script
+
+    def prepare_script(self, script: str, language: str | None = None) -> tuple[str, list[dict]]:
+        """Optional framework-specific normalization with traceable changes."""
+        return script, []
+
+    def validate_prepared_script(self, file_path: str, temp_dir: str, language: str | None = None) -> None:
+        """Optional framework-specific preflight; must not launch the test."""
+        return None
+
+    def validate_script_candidate(
+        self,
+        framework: str,
+        script: str,
+        language: str | None = None,
+    ) -> tuple[str, list[dict]]:
+        """Prepare and preflight a candidate without executing its test steps."""
+        if not self.supports_candidate_validation:
+            raise NotImplementedError(f"Candidate validation is not implemented for {framework}.")
+        resolved_language = (language or self.default_language or "").lower()
+        normalized = self.normalize_script(script, resolved_language)
+        normalization_applied = normalized != script
+        prepared, transformations = self.prepare_script(normalized, resolved_language)
+        if normalization_applied:
+            transformations.insert(0, {
+                "type": "framework_normalization",
+                "description": "Framework-specific script normalization was applied before validation.",
+            })
+        filename = self.determine_filename(framework, prepared, resolved_language)
+        with tempfile.TemporaryDirectory(prefix="genia-script-check-") as temp_dir:
+            file_path = self.resolve_script_path(temp_dir, filename)
+            file_path = self._write_file(os.path.dirname(file_path), os.path.basename(file_path), prepared)
+            self.prepare_workspace(temp_dir, file_path, prepared, resolved_language)
+            self.validate_prepared_script(file_path, temp_dir, resolved_language)
+        return prepared, transformations
 
     def prepare_workspace(self, temp_dir: str, file_path: str, script: str, language: str | None = None) -> None:
         return None
@@ -345,17 +409,40 @@ class BaseExecutionStrategy(ABC):
         start = time.time()
         execution_log_lines: list[str] = []
         temp_dir = tempfile.mkdtemp(prefix="genia-exec-")
+        source_script_sha256 = hashlib.sha256(script.encode("utf-8")).hexdigest()
+        normalized_script = script
+        transformations: list[dict] = []
+        execution_metadata = {
+            "execution_phase": "test_execution",
+            "source_script_sha256": source_script_sha256,
+            "executed_script_sha256": source_script_sha256,
+            "script_transformations": transformations,
+        }
 
         try:
             resolved_language = (language or self.default_language or "").lower()
             filename = self.determine_filename(framework, script, resolved_language)
             normalized_script = self.normalize_script(script, resolved_language)
+            normalization_applied = normalized_script != script
+            normalized_script, transformations = self.prepare_script(normalized_script, resolved_language)
+            if normalization_applied:
+                transformations.insert(0, {
+                    "type": "framework_normalization",
+                    "description": "Framework-specific script normalization was applied before execution.",
+                })
+            execution_metadata.update({
+                "source_script_sha256": source_script_sha256,
+                "executed_script_sha256": hashlib.sha256(normalized_script.encode("utf-8")).hexdigest(),
+                "script_transformations": transformations,
+            })
             file_path = self.resolve_script_path(temp_dir, filename)
             file_path = self._write_file(os.path.dirname(file_path), os.path.basename(file_path), normalized_script)
             self.prepare_workspace(temp_dir, file_path, normalized_script, resolved_language)
             execution_log_lines.append(f"[SETUP] Workspace: {temp_dir}")
             execution_log_lines.append(f"[SETUP] Script file: {file_path}")
             self._emit(log_callback, "info", f"Script preparado em {file_path}")
+
+            self.validate_prepared_script(file_path, temp_dir, resolved_language)
 
             command = self.build_command(file_path, resolved_language, temp_dir)
             execution_log_lines.append(f"[EXECUTION] Command: {' '.join(command)}")
@@ -381,6 +468,28 @@ class BaseExecutionStrategy(ABC):
                 execution_log_lines=execution_log_lines,
                 artifacts=artifacts,
                 command=command,
+                execution_metadata=execution_metadata,
+            )
+        except ExecutionPreflightError as exc:
+            execution_log_lines.append(f"[PREFLIGHT] {exc}")
+            if exc.stdout:
+                execution_log_lines.extend(f"[PREFLIGHT STDOUT] {line}" for line in exc.stdout.splitlines())
+            if exc.stderr:
+                execution_log_lines.extend(f"[PREFLIGHT STDERR] {line}" for line in exc.stderr.splitlines())
+            self._emit(log_callback, "error", str(exc))
+            return self._error_result(
+                framework=framework,
+                start=start,
+                execution_log_lines=execution_log_lines,
+                message=str(exc),
+                stdout_text=exc.stdout,
+                stderr_text=exc.stderr or str(exc),
+                execution_metadata={
+                    "execution_phase": exc.phase,
+                    "source_script_sha256": source_script_sha256,
+                    "executed_script_sha256": hashlib.sha256(normalized_script.encode("utf-8")).hexdigest(),
+                    "script_transformations": transformations,
+                },
             )
         except subprocess.TimeoutExpired:
             self._emit(log_callback, "error", "Execução excedeu o tempo limite")
@@ -389,6 +498,7 @@ class BaseExecutionStrategy(ABC):
                 start=start,
                 execution_log_lines=execution_log_lines,
                 message="Execution timeout",
+                execution_metadata=execution_metadata,
             )
         except Exception as exc:
             self._emit(log_callback, "error", str(exc))
@@ -397,6 +507,7 @@ class BaseExecutionStrategy(ABC):
                 start=start,
                 execution_log_lines=execution_log_lines,
                 message=str(exc),
+                execution_metadata=execution_metadata,
             )
 
 

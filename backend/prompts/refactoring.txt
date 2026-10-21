@@ -23,6 +23,8 @@ CONTEXT PLACEHOLDERS:
 - {final_report}
 - {manual_changes}
 - {refactoring_context}
+- {framework}
+- {language}
 
 STRICT OUTPUT CONTRACT:
 Return ONLY valid JSON with EXACTLY the following keys and no extras:
@@ -45,8 +47,13 @@ RULES:
 - Do not use markdown.
 - Do not add commentary outside the JSON.
 - Preserve the business flow.
+- Treat `{framework}` and `{language}` as authoritative. Produce source code that follows that framework's native file format, syntax, indentation, variable declarations, and keyword/API rules; do not mix syntax from other frameworks.
+- Use the confirmed script as the executable baseline. Keep valid setup, teardown, imports, variable declarations, locators, and assertions unless the execution evidence justifies changing them.
+- Return only executable source code in `refactored_script`. Do not include Markdown fences, headings, explanations, diffs, or JSON wrappers inside that field.
+- Do not invent keywords, APIs, locators, variables, or test steps. When the execution evidence does not justify a code change, return the confirmed script unchanged.
 - Reuse stable parts of the original script when possible.
 - Do not remove assertions unless necessary for stability.
 - Improve waits, selectors, structure, and duplication.
+- Keep one browser session per test case. Reuse it with `Go To` for subsequent URLs and remove duplicate `Open Browser` calls unless a separate browser session is explicitly required by the test.
 - If no meaningful refactor is needed, return the original script unchanged.
 - The response must sound like a professional enterprise QA refactoring report.

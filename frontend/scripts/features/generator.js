@@ -56,6 +56,7 @@
   };
   const stageToStatusIcon = {
     idle: "○",
+    pending: "⟳",
     running: "⟳",
     done: "✓",
     error: "✕",
@@ -63,6 +64,7 @@
   const setupTestGeneratorPage = (options = {}) => {
     const onGenerationComplete = options.onGenerationComplete;
     let currentSession = null;
+    let refactorExecutionInProgress = false;
     let promptBundle = {};
     let promptBundleFramework = "";
     let promptLoadToken = 0;
@@ -144,6 +146,7 @@
       const icon = stageToStatusIcon[state] || stageToStatusIcon.idle;
       const indicator = byId(`result-status-${stageKey}`);
       const tabButton = byId(`result-tab-btn-${stageKey}`);
+      const tabPanel = byId(`tab-${stageKey}`);
 
       if (indicator) {
         indicator.textContent = icon;
@@ -152,6 +155,24 @@
 
       if (tabButton) {
         tabButton.dataset.state = state;
+      }
+
+      if (tabPanel && stageKey !== "logs") {
+        let loader = tabPanel.querySelector(".stage-loading-placeholder");
+        const isLoading = state === "pending" || state === "running";
+        tabPanel.classList.toggle("stage-is-loading", isLoading);
+        if (isLoading) {
+          if (!loader) {
+            loader = document.createElement("div");
+            loader.className = "stage-loading-placeholder";
+            loader.setAttribute("role", "status");
+            loader.setAttribute("aria-label", "Loading");
+            loader.innerHTML = '<span class="stage-loading-spinner" aria-hidden="true"></span><span class="stage-loading-copy">Loading<span class="stage-loading-dots" aria-hidden="true"></span></span>';
+            tabPanel.prepend(loader);
+          }
+        } else {
+          loader?.remove();
+        }
       }
     };
 
@@ -242,6 +263,15 @@
       if (type === "STAGE_DONE" && stageKey) {
         setResultStageState(stageKey, "done");
         renderStageOutput(stageKey, payload);
+      }
+
+      if (type === "PIPELINE_ERROR") {
+        pipelineExecutionStarted = false;
+        ["execution", "homologation", "finalization", "refactoring"].forEach((key) => {
+          const state = byId(`result-tab-btn-${key}`)?.dataset.state;
+          if (state === "pending" || state === "running") setResultStageState(key, "idle");
+        });
+        if (stageKey) setResultStageState(stageKey, "error");
       }
 
       if (type === "MODULE_START" && channel === "extraction") {
@@ -870,6 +900,9 @@
         prompts_used: "Prompts Utilizados",
         exportables: "Artefatos Exportáveis",
         final_result: "Resultado Final",
+        implemented_improvements: "Implemented Improvements",
+        possible_errors: "Possible Errors",
+        suggested_follow_up: "Suggested Follow Up",
       };
       return map[key] || key.replaceAll("_", " ");
     };
@@ -891,8 +924,6 @@
 
       const block = document.createElement("div");
       block.className = "report-block";
-      block.innerHTML = `<h4>Resultado Final</h4>`;
-
       const grid = document.createElement("div");
       grid.className = "report-summary-grid";
 
@@ -1532,7 +1563,8 @@
       return String(value);
     };
 
-    const renderNarrativeBlocks = (container, payload) => {
+    const renderNarrativeBlocks = (container, payload, excludedKeys = []) => {
+      const excluded = new Set(excludedKeys);
       const orderedKeys = [
         "execution_analysis",
         "logs_analysis",
@@ -1544,11 +1576,14 @@
         "general_recommendations",
         "technical_diagnosis",
         "possible_improvements",
+        "implemented_improvements",
+        "possible_errors",
+        "suggested_follow_up",
         "stability_rate",
         "flaky_probability",
         "robustness_analysis",
       ];
-      const availableKeys = orderedKeys.filter((key) => Object.prototype.hasOwnProperty.call(payload, key));
+      const availableKeys = orderedKeys.filter((key) => !excluded.has(key) && Object.prototype.hasOwnProperty.call(payload, key));
       if (!availableKeys.length) return false;
 
       const wrapper = document.createElement("div");
@@ -1563,6 +1598,24 @@
         wrapper.appendChild(block);
       });
       container.appendChild(wrapper);
+      return true;
+    };
+
+    const renderStandaloneNarrativeBlocks = (container, payload, keys = [], directChildren = false) => {
+      const presentKeys = keys.filter((key) => Object.prototype.hasOwnProperty.call(payload, key));
+      if (!presentKeys.length) return false;
+      const wrapper = document.createElement("div");
+      wrapper.className = "report-stack report-stack-outside-card";
+      presentKeys.forEach((key) => {
+        const block = document.createElement("article");
+        block.className = "report-fragment";
+        block.innerHTML = `
+          <div class="report-fragment-title">${friendlyReportLabel(key)}</div>
+          <div class="report-fragment-body">${escapeHtml(prettyValue(payload[key]))}</div>
+        `;
+        (directChildren ? container : wrapper).appendChild(block);
+      });
+      if (!directChildren) container.appendChild(wrapper);
       return true;
     };
 
@@ -1622,23 +1675,30 @@
       return true;
     };
 
-    const renderReportSection = (containerId, title, value, extraRenderer = null) => {
+    const renderReportSection = (containerId, title, value, extraRenderer = null, options = {}) => {
       const container = byId(containerId);
       if (!container) return;
       const safeValue = value && typeof value === "object" ? value : { value };
+      const titleMarkup = `<div class="report-card-title">${title}</div>`;
+      const cardClass = options.cardClass ? ` ${options.cardClass}` : "";
       container.innerHTML = `
-        <div class="report-card">
-          <div class="report-card-title">${title}</div>
+        ${options.statusOutsideCard ? '<div class="report-section-header report-status-header"></div>' : ""}
+        <div class="report-card${cardClass}">
+          ${titleMarkup}
           <div class="report-grid"></div>
         </div>
       `;
       const grid = container.querySelector(".report-grid");
       if (!grid) return;
 
-      const renderedNarrative = renderNarrativeBlocks(container.querySelector(".report-card"), safeValue);
+      const excludedKeys = new Set(options.excludedKeys || []);
+      const narrativeOutsideKeys = new Set(options.narrativeOutsideKeys || []);
+      const renderedNarrative = renderNarrativeBlocks(container.querySelector(".report-card"), safeValue, [...excludedKeys, ...narrativeOutsideKeys]);
 
       Object.entries(safeValue || {}).forEach(([key, item]) => {
         if (
+          excludedKeys.has(key) ||
+          narrativeOutsideKeys.has(key) ||
           key === "screenshots" ||
           key === "logs" ||
           key === "exportables" ||
@@ -1665,11 +1725,12 @@
         grid.appendChild(row);
       });
 
+      renderStandaloneNarrativeBlocks(container, safeValue, [...narrativeOutsideKeys], options.narrativeDirectChildren === true);
       extraRenderer?.(safeValue, container);
       const card = container.querySelector(".report-card");
       if (card) {
         const hasContent = grid.childElementCount > 0 || Boolean(renderedNarrative);
-        card.classList.toggle("report-card--empty", !hasContent);
+        if (!hasContent) card.remove();
       }
     };
 
@@ -1750,20 +1811,21 @@
       return null;
     };
 
-    const injectReportStatus = (containerId, stageKey, value) => {
+    const injectReportStatus = (containerId, stageKey, value, outsideCard = false) => {
       const container = byId(containerId);
       if (!container) return;
       const card = container.querySelector(".report-card");
-      if (!card) return;
+      const target = outsideCard ? container.querySelector(".report-status-header") : card;
+      if (!target) return;
 
-      card.querySelector(".report-status")?.remove();
+      target.querySelector(".report-status")?.remove();
       const status = resolveReportStatus(stageKey, value);
       if (!status) return;
 
       const pill = document.createElement("div");
       pill.className = `report-status report-status-${status.state}`;
       pill.textContent = status.label;
-      card.prepend(pill);
+      target.prepend(pill);
     };
 
     const renderExecutionReport = (execution) => {
@@ -1771,7 +1833,7 @@
       const liveImage = byId("executionLiveImage");
       liveViewer?.classList.add("hidden");
       liveImage?.removeAttribute("src");
-      renderReportSection("executionContent", "Execução", execution, (value, container) => {
+      renderReportSection("executionContent", "EXECUÇÃO", execution, (value, container) => {
         const imageArtifacts = getImageArtifactPaths(
           value?.screenshots || [],
           value?.image_evidence || [],
@@ -1824,14 +1886,14 @@
           summary.innerHTML = `<h4>Resumo técnico</h4><pre>${escapeHtml(JSON.stringify(value.test_results, null, 2))}</pre>`;
           container.appendChild(summary);
         }
-      });
-      injectReportStatus("executionContent", "execution", execution);
+      }, { statusOutsideCard: true, cardClass: "execution-report-card" });
+      injectReportStatus("executionContent", "execution", execution, true);
     };
 
     const renderHomologationReport = (homologation) => {
       const banner = byId("homologationHeader");
       if (banner) {
-        banner.textContent = homologation?.homologation_status ? `Status: ${homologation.homologation_status}` : "Homologação atualizada";
+        banner.textContent = "Homologação atualizada";
         banner.classList.remove("hidden");
       }
       renderReportSection("homologationContent", "Homologação", homologation, (value, container) => {
@@ -1846,9 +1908,7 @@
         const summaryGrid = document.createElement("div");
         summaryGrid.className = "report-summary-grid";
         const summaryFields = [
-          ["Taxa de sucesso", value.success_rate],
           ["Falhas", value.failure_count || value.failures || value.error_count],
-          ["Causa provável", value.probable_cause],
           ["Tempo de execução", value.execution_time || value.runtime],
         ].filter(([, fieldValue]) => fieldValue !== undefined && fieldValue !== null && fieldValue !== "");
 
@@ -1865,13 +1925,28 @@
         if (imageArtifacts.length) {
           renderScreenshotGallery(imageArtifacts, container, "Screenshots");
         }
+      }, {
+        statusOutsideCard: true,
+        cardClass: "execution-report-card",
+        narrativeOutsideKeys: [
+          "execution_analysis",
+          "logs_analysis",
+          "homologation_status",
+          "success_rate",
+          "probable_cause",
+          "final_conclusion",
+          "general_recommendations",
+        ],
       });
-      injectReportStatus("homologationContent", "homologation", homologation);
+      injectReportStatus("homologationContent", "homologation", homologation, true);
     };
 
     const renderFinalizationReport = (report) => {
-      renderReportSection("finalizationContent", "Finalização", report);
-      injectReportStatus("finalizationContent", "finalization", report);
+      renderReportSection("finalizationContent", "Finalização", report, null, {
+        statusOutsideCard: true,
+        cardClass: "execution-report-card",
+      });
+      injectReportStatus("finalizationContent", "finalization", report, true);
       const exportables = report?.exportables || {};
       const container = byId("finalizationContent");
       if (!container) return;
@@ -1907,38 +1982,130 @@
       }
     };
 
+    const formatRefactoringDiff = (value) => {
+      let source = prettyValue(value)
+        .replace(/\\r\\n/g, "\n")
+        .replace(/\\n/g, "\n")
+        .replace(/\\t/g, "\t");
+      const isPatch = /\*\*\*\s*(?:Begin Patch|Update File:|End Patch)|@@/.test(source);
+      if (!isPatch) return source.trim();
+
+      const fileNames = [...source.matchAll(/\*\*\*\s*Update File:\s*([^\s]+)/g)].map((match) => match[1]);
+      source = source
+        .replace(/\*\*\*\s*Begin Patch\s*/g, "\n")
+        .replace(/\*\*\*\s*Update File:\s*[^\s]+/g, "\n")
+        .replace(/\*\*\*\s*End Patch\s*/g, "\n")
+        .replace(/@@\s*-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s*@@/g, "\n")
+        .replace(/@@/g, "\n")
+        .replace(/(^|\s)([+-])(?![+-])(?=\s|\S)/g, "$1\n$2");
+
+      const removed = [];
+      const added = [];
+      source.split(/\r?\n/).forEach((line) => {
+        if (line.startsWith("+")) {
+          const content = line.slice(1).replace(/^ /, "");
+          if (content.trim()) added.push(content);
+        } else if (line.startsWith("-")) {
+          const content = line.slice(1).replace(/^ /, "");
+          if (content.trim()) removed.push(content);
+        }
+      });
+
+      const sections = [];
+      if (fileNames.length) sections.push(`Arquivo: ${fileNames.join(", ")}`);
+      if (removed.length) sections.push(`Removido:\n${removed.join("\n")}`);
+      if (added.length) sections.push(`Adicionado:\n${added.join("\n")}`);
+      return sections.join("\n\n") || source.trim();
+    };
+
+    const normalizeRefactoringReport = (refactoring) => {
+      const source = refactoring && typeof refactoring === "object" ? refactoring : {};
+      const canonicalKey = (key) => String(key)
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]/gi, "")
+        .toLowerCase();
+      const aliases = {
+        original_script: ["originalscript", "currentscript", "executedscript"],
+        refactored_script: ["refactoredscript", "improvedscript", "script"],
+        diff: ["diff", "scriptdiff", "changes", "differences"],
+        justification: ["justification", "rationale", "reasoning"],
+        implemented_improvements: ["implementedimprovements", "improvementsimplemented", "implementedchanges"],
+        possible_errors: ["possibleerrors", "potentialerrors", "risks", "observedissues"],
+        suggested_follow_up: ["suggestedfollowup", "suggestedfollowups", "followup", "nextsteps"],
+      };
+      const findField = (target, value = source, seen = new Set()) => {
+        if (!value || typeof value !== "object" || seen.has(value)) return undefined;
+        seen.add(value);
+        const names = new Set([canonicalKey(target), ...(aliases[target] || [])]);
+        for (const [key, item] of Object.entries(value)) {
+          if (names.has(canonicalKey(key)) && item !== undefined && item !== null && item !== "") return item;
+        }
+        for (const item of Object.values(value)) {
+          const nested = findField(target, item, seen);
+          if (nested !== undefined) return nested;
+        }
+        return undefined;
+      };
+      const asText = (value) => typeof value === "string" ? value.trim() : prettyValue(value);
+      const field = (key) => {
+        const value = findField(key);
+        return value === undefined ? "" : asText(value);
+      };
+
+      return {
+        original_script: field("original_script"),
+        refactored_script: field("refactored_script"),
+        script_validation: source.script_validation && typeof source.script_validation === "object" ? source.script_validation : undefined,
+        diff: field("diff"),
+        justification: field("justification"),
+        implemented_improvements: field("implemented_improvements"),
+        possible_errors: field("possible_errors"),
+        suggested_follow_up: field("suggested_follow_up"),
+      };
+    };
+
     const renderRefactoringReport = (refactoring) => {
-      renderReportSection("refactoringContent", "Refatoração", refactoring, (value, container) => {
+      const normalizedRefactoring = normalizeRefactoringReport(refactoring);
+      renderReportSection("refactoringContent", "Refatoração", normalizedRefactoring, (value, container) => {
+        if (value.script_validation?.status) {
+          const validation = document.createElement("div");
+          const validationStatus = String(value.script_validation.status).toLowerCase();
+          validation.className = `report-metric refactoring-validation-metric ${validationStatus === "passed" ? "is-success" : "is-warning"}`;
+          validation.innerHTML = `<span>Pré-validação do script</span><strong>${escapeHtml(value.script_validation.message || validationStatus)}</strong>`;
+          container.appendChild(validation);
+        }
         if (value.original_script || value.refactored_script) {
           const block = document.createElement("div");
-          block.className = "report-block";
+          block.className = "report-block report-block-panel refactoring-comparison-panel";
           block.innerHTML = `
-            <h4>Executado / Refatorado</h4>
-            <div class="split-grid">
-              <div><strong>Executado</strong><pre>${escapeHtml(value.original_script || "")}</pre></div>
-              <div><strong>Refatorado</strong><pre>${escapeHtml(value.refactored_script || "")}</pre></div>
+            <div class="split-grid" style="margin-top: 1rem;">
+              <div><h5>Versão atual</h5><pre>${escapeHtml(value.original_script || "")}</pre></div>
+              <div><h5>Versão refatorada</h5><pre>${escapeHtml(value.refactored_script || "")}</pre></div>
             </div>
           `;
           container.appendChild(block);
         }
         if (value.diff) {
           const diff = document.createElement("div");
-          diff.className = "report-block";
-          diff.innerHTML = `<h4>Diff</h4><pre>${escapeHtml(value.diff)}</pre>`;
+          diff.className = "report-metric refactoring-detail-metric";
+          diff.innerHTML = `<span>Diff</span><strong class="refactoring-diff-text">${escapeHtml(formatRefactoringDiff(value.diff))}</strong>`;
           container.appendChild(diff);
         }
         if (value.justification) {
           const just = document.createElement("div");
-          just.className = "report-block";
-          just.innerHTML = `<h4>Justificativa</h4><pre>${escapeHtml(value.justification)}</pre>`;
+          just.className = "report-metric refactoring-detail-metric";
+          just.innerHTML = `<span>Justificativa</span><strong>${escapeHtml(value.justification)}</strong>`;
           container.appendChild(just);
         }
+      }, {
+        excludedKeys: ["script_validation"],
+        narrativeOutsideKeys: ["implemented_improvements", "possible_errors", "suggested_follow_up"],
+        narrativeDirectChildren: true,
       });
-      injectReportStatus("refactoringContent", "refactoring", refactoring);
-
       const editor = byId("refactoringScriptEditor");
-      if (editor && refactoring?.refactored_script) {
-        editor.value = refactoring.refactored_script;
+      if (editor && normalizedRefactoring.refactored_script) {
+        editor.value = normalizedRefactoring.refactored_script;
       }
     };
 
@@ -2036,6 +2203,9 @@
       const status = byId("executionLiveStatus");
       if (status) status.textContent = [frame.label, frame.url].filter(Boolean).join(" · ");
       viewer.classList.remove("hidden");
+      const executionTab = byId("tab-execution");
+      executionTab?.classList.remove("stage-is-loading");
+      executionTab?.querySelector(".stage-loading-placeholder")?.remove();
       activateResultTab("execution");
     };
 
@@ -2091,9 +2261,6 @@
               </label>
               <div id="validationSummary"></div>
               <div class="validation-section">
-                <div class="validation-section-header">
-                  <h4>Variáveis detectadas</h4>
-                </div>
                 <div id="validationDetectedInputs" class="validation-card-grid-list"></div>
               </div>
               <div class="form-group">
@@ -2153,15 +2320,15 @@
         if (tab.key === "refactoring") {
           return `
             <div id="tab-refactoring" class="result-tab">
-              <div class="code-actions">
-                <button type="button" class="btn-secondary" data-action="rerun-from-zero">Executar do zero novamente</button>
-                <button type="button" class="btn-primary btn-primary-inline" data-action="apply-refactor-stage">Executar script refatorado a partir de Confirmation</button>
-                <button type="button" class="btn-secondary" data-action="finalize-execution">Finalizar execução</button>
+              <div class="code-actions" style="padding: 1rem;">
+                <button type="button" class="btn-secondary" data-action="rerun-from-zero">Reiniciar do zero</button>
+                <button type="button" class="btn-primary btn-primary-inline" data-action="apply-refactor-stage">Executar versão refatorada</button>
+                <button type="button" class="btn-secondary" data-action="finalize-execution">Concluir</button>
               </div>
-              <div class="form-group">
+              <section class="form-group report-block report-block-panel refactoring-script-panel" style="padding-top:1rem;">
                 <label for="refactoringScriptEditor">Script refatorado</label>
                 <textarea id="refactoringScriptEditor" rows="14" class="prompt-textarea"></textarea>
-              </div>
+              </section>
               <div class="report-shell">
                 <div id="refactoringContent" class="report-host"></div>
               </div>
@@ -2250,7 +2417,13 @@
       `;
 
       container.querySelectorAll(".result-tab-btn").forEach((button) => {
-        button.addEventListener("click", () => activateResultTab(button.dataset.resultTab));
+        button.addEventListener("click", () => {
+          const stageKey = button.dataset.resultTab;
+          activateResultTab(stageKey);
+          if (pipelineExecutionStarted && (!button.dataset.state || button.dataset.state === "idle")) {
+            setResultStageState(stageKey, "pending");
+          }
+        });
       });
 
       RESULT_TABS.forEach((tab) => setResultStageState(tab.key, "idle"));
@@ -2366,30 +2539,35 @@
 
     const renderPhaseTwoResults = (results) => {
       setStep(6, "ok");
+      setResultStageState("confirmation", "done");
       addLog(results.confirmation_used_llm ? "Confirmação concluída com ajustes manuais" : "Confirmação concluída sem alterações", "success", "Confirmação");
       if (results.confirmed_script) {
         updateCode("confirmationContent", results.confirmed_script);
       }
 
       setStep(7, "ok");
+      setResultStageState("execution", "done");
       if (results.execution || results.execution_result) {
         renderExecutionReport(results.execution || results.execution_result);
         addLog("Execução concluída", "success", "Execução");
       }
 
       setStep(8, "ok");
+      setResultStageState("homologation", "done");
       if (results.homologation) {
         renderHomologationReport(results.homologation);
         addLog("Homologação concluída", "success", "Homologação");
       }
 
       setStep(9, "ok");
+      setResultStageState("finalization", "done");
       addLog("Finalização concluída", "success", "Finalização");
       if (results.finalReport || results.exportables?.json) {
         renderFinalizationReport(results.finalReport || results.exportables?.json);
       }
 
       setStep(10, "ok");
+      setResultStageState("refactoring", "done");
       if (results.refactoring || results.refactoredScript) {
         renderRefactoringReport(results.refactoring || { refactored_script: results.refactoredScript });
         addLog("Refatoração concluída", "success", "Refatoração");
@@ -2664,6 +2842,8 @@
     };
 
     const applyRefactoredScriptAndRerun = async () => {
+      if (refactorExecutionInProgress) return;
+
       const editor = byId("refactoringScriptEditor");
       const scriptOverride = normalizeText(editor?.value);
       if (!scriptOverride) {
@@ -2674,6 +2854,17 @@
       if (!currentSession?.pipelineId) {
         showToast("Pipeline não encontrada", "error");
         return;
+      }
+
+      refactorExecutionInProgress = true;
+      const rerunStages = ["execution", "homologation", "finalization", "refactoring"];
+      rerunStages.forEach((stageKey) => setResultStageState(stageKey, "pending"));
+      const actionButton = byId("tab-refactoring")?.querySelector('[data-action="apply-refactor-stage"]');
+      const originalButtonText = actionButton?.textContent;
+      if (actionButton) {
+        actionButton.disabled = true;
+        actionButton.setAttribute("aria-busy", "true");
+        actionButton.textContent = "Executando script refatorado…";
       }
 
       try {
@@ -2688,9 +2879,21 @@
         setResultStageState("confirmation", "done");
         showToast("Script refatorado aplicado e pipeline reexecutada", "success");
       } catch (error) {
+        pipelineExecutionStarted = false;
+        rerunStages.forEach((stageKey) => {
+          const state = byId(`result-tab-btn-${stageKey}`)?.dataset.state;
+          if (state === "pending" || state === "running") setResultStageState(stageKey, "idle");
+        });
         console.error(error);
         addLog(`Falha ao aplicar refatoração: ${error.message}`, "error");
         showToast(error.message, "error");
+      } finally {
+        refactorExecutionInProgress = false;
+        if (actionButton) {
+          actionButton.disabled = false;
+          actionButton.removeAttribute("aria-busy");
+          actionButton.textContent = originalButtonText || "Executar versão refatorada";
+        }
       }
     };
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GenIA-E2eTest Platform</title>
-  <link rel="stylesheet" href="styles.css?v=20261019-live-visualization" />
+  <link rel="stylesheet" href="styles.css?v=20261021-refactor-diff-readable" />
 </head>
 <body>
   <div id="authPanel" class="auth-panel">
@@ -93,7 +93,7 @@
         <div class="nav-section">
           <button class="nav-item" id="genTestNavBtn" data-screen="test-generator" type="button">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2L12 3Z"/><path d="m19 15 .9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15Z"/></svg></span>
-            Gerar Testes
+            Teste E2E
             <span class="nav-chevron">›</span>
           </button>
           <div class="nav-sub" id="genTestSub">
@@ -362,7 +362,7 @@
           <section class="section-card prompt-llm-panel prompt-global-llm-card">
               <div class="prompt-llm-panel-head">
                 <div>
-                  <h4>LLM GLOBAL</h4>
+                  <h3>LLM GLOBAL</h3>
                   <p>Esta configuração é herdada por todas as etapas, a menos que você escolha um modelo específico no card da etapa.</p>
                 </div>
               </div>
@@ -373,11 +373,11 @@
 
           <section class="section-card" id="prompts-section">
             <h3>Prompts</h3>
-            <p class="helper-text">Customize os prompts de cada etapa do pipeline, ou use os padrões do backend</p>
+            <p class="helper-text">Customize os prompts de cada etapa do pipeline, ou use os padrões do backend.</p>
             <div id="promptsAccordion" class="stack"></div>
           </section>
 
-          <button type="button" id="generateTestBtn" class="btn-generate">Gerar teste</button>
+          <button type="button" id="generateTestBtn" class="btn-generate">Iniciar Execução</button>
           <div id="generationResults" class="generation-results" style="display:none;"></div>
         </div>
       </section>
@@ -404,14 +404,14 @@
   <script src="scripts/ui/toast.js?v=20261018" defer></script>
   <script src="scripts/ui/layout.js?v=20261018" defer></script>
   <script src="https://d3js.org/d3.v7.min.js"></script>
-  <script src="scripts/services/api.js?v=20261018" defer></script>
+  <script src="scripts/services/api.js?v=20261021-resume-context" defer></script>
   <script src="scripts/services/auth.js?v=20261018" defer></script>
-  <script src="scripts/services/generation.js?v=20261019-live-visualization" defer></script>
+  <script src="scripts/services/generation.js?v=20261021-resume-context" defer></script>
   <script src="scripts/features/navigation.js?v=20261018" defer></script>
   <script src="scripts/features/dashboard.js?v=20261018" defer></script>
   <script src="scripts/features/profile.js?v=20261018" defer></script>
   <script src="scripts/features/llm-config.js?v=20261018" defer></script>
-  <script src="scripts/features/generator.js?v=20261019-visual-off" defer></script>
+  <script src="scripts/features/generator.js?v=20261021-refactor-diff-readable" defer></script>
   <script src="scripts/features/auth.js?v=20261018" defer></script>
   <script src="scripts/main.js?v=20261018" defer></script>
 </body>

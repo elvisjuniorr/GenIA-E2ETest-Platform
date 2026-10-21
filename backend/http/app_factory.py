@@ -472,10 +472,37 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
         data = request.get_json(force=True)
         pipeline_id = data["pipeline_id"]
         session = orchestrator._get_session(pipeline_id)
+        session_context = data.get("session_context")
+        context_is_recoverable = (
+            isinstance(session_context, dict)
+            and isinstance(session_context.get("refined"), dict)
+            and bool(session_context.get("framework"))
+            and bool(session_context.get("language"))
+        )
+        session_data = session.get("data") if session else None
+        session_is_resumable = (
+            isinstance(session_data, dict)
+            and isinstance(session_data.get("refined"), dict)
+            and bool(session_data.get("framework"))
+            and bool(session_data.get("language"))
+        )
+        trace(
+            f"Resume request pipeline_id={pipeline_id} session_present={session is not None} "
+            f"session_resumable={session_is_resumable} recovery_context={context_is_recoverable}"
+        )
+        if not session_is_resumable and context_is_recoverable:
+            if not session:
+                session = orchestrator._create_session(pipeline_id)
+            session["data"].update(session_context)
+            session.setdefault("history", [])
+            session.setdefault("timeline", [])
+            session.setdefault("execution_logs", [])
         llm_config = session.get("data", {}).get("llm_config") if session else None
         llm_config = llm_config or data.get("llm_config")
-        if not session or not llm_config:
-            return jsonify({"error": "A sessão expirou ou não foi encontrada. Inicie a pipeline novamente."}), 410
+        if not session:
+            return jsonify({"error": "A sessão não foi recuperada. Atualize a página e gere o script novamente.", "reason": "session_unavailable"}), 410
+        if not llm_config:
+            return jsonify({"error": "A configuração LLM não chegou na solicitação de retomada. Atualize a página antes de tentar novamente.", "reason": "llm_config_missing"}), 422
         session["data"]["llm_config"] = llm_config
 
         def run_job():

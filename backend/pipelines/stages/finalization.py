@@ -9,6 +9,39 @@ from ..shared import _compact_execution_artifacts, _json_safe, _render_prompt
 
 
 class FinalizationStage(PipelineStageRunner):
+    @staticmethod
+    def _enforce_execution_outcome(result: Any, payload: Dict[str, Any]) -> Any:
+        if not isinstance(result, dict):
+            return result
+        execution = payload.get("execution") or {}
+        if not isinstance(execution, dict):
+            return result
+        status = str(execution.get("status") or "").casefold()
+        if status == "passed":
+            if isinstance(result.get("final_result"), dict):
+                result["final_result"]["test_passed"] = "true"
+            return result
+
+        metadata = execution.get("test_results") or {}
+        phase = metadata.get("execution_phase") if isinstance(metadata, dict) else None
+        diagnosis = execution.get("stderr") or execution.get("stacktrace") or "O executor terminou sem status PASSED."
+        final_result = result.get("final_result")
+        if isinstance(final_result, dict):
+            final_result.update({
+                "test_passed": "false",
+                "automation_reliability": "LOW",
+                "production_readiness": "NOT_READY",
+                "business_validation_status": "NOT_VALIDATED" if phase == "script_validation" else "PARTIALLY_VALIDATED",
+                "main_failure_reason": diagnosis[:1800],
+                "technical_diagnosis": (
+                    "A pré-validação rejeitou o script antes de iniciar os passos do teste; nenhuma interação nem asserção de negócio foi executada. "
+                    if phase == "script_validation" else "A execução não terminou com status PASSED. "
+                ) + diagnosis[:1800],
+                "final_conclusion": "Não aprovar esta automação. Corrija o diagnóstico registrado pelo executor e execute novamente antes de avaliar o comportamento funcional.",
+            })
+        result["pipeline_status"] = "FAILED"
+        return result
+
     async def run(
         self,
         current_provider: str,
@@ -80,7 +113,7 @@ class FinalizationStage(PipelineStageRunner):
             timeline=payload.get("timeline"),
         )
         result = self.llm.generate_json(api_key, model, final_prompt, temperature=temperature)
-        return _json_safe(result)
+        return self._enforce_execution_outcome(_json_safe(result), payload)
 
 
 __all__ = ["FinalizationStage"]

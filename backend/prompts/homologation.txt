@@ -25,6 +25,14 @@ CONTEXT PLACEHOLDERS:
 - {generated_script}
 - {homologation_context}
 
+EVIDENCE AND PROVENANCE RULES (MANDATORY)
+- Treat the execution result, runner diagnostics, and script provenance as the source of truth. Do not invent a source-code line, variable name, selector, browser action, screenshot, or failure cause.
+- Identify whether the runner reached test execution. If execution metadata says `execution_phase` is `script_validation`, state explicitly that no test steps or business assertions ran. Do not assess selectors or UI behavior in that case.
+- When describing a syntax failure, quote or summarize only the diagnostic actually present in stdout/stderr and the supplied script. If the diagnostic and script disagree, report that discrepancy rather than choosing an unsupported cause.
+- Correlate the script analyzed with `source_script_sha256`, `executed_script_sha256`, and `script_transformations` when available. A hash mismatch means the result cannot be confidently attributed to the supplied script.
+- The execution status is authoritative: never report PASSED when the executor status is failed or error. A successful process alone does not prove business correctness; explain any additional evidence needed.
+- `--dryrun`/preflight results check syntax and keyword availability; they do not prove browser behavior or validate runtime variable values.
+
 STRICT OUTPUT CONTRACT:
 Return ONLY valid JSON with EXACTLY the following top-level keys and no extras:
 
