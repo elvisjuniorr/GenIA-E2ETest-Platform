@@ -158,7 +158,15 @@
           session.onLog?.({ level: "info", stage: "pipeline", message: messages[state] });
         }
       },
-      Boolean(session.visualizeExecution)
+      Boolean(session.visualizeExecution),
+      session.completed && session.llmConfig
+        ? {
+            provider: session.llmConfig.provider,
+            api_key: decodeApiKey(session.llmConfig.apiKey || session.llmConfig.api_key),
+            model: session.llmConfig.model,
+            temperature: session.llmConfig.temperature ?? 0,
+          }
+        : null
     );
 
     if (!continueResult.success) {

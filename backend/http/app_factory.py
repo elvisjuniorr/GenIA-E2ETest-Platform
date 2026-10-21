@@ -473,8 +473,11 @@ def create_app() -> tuple[Flask, SocketIO, GenIAOrchestrator]:
         pipeline_id = data["pipeline_id"]
         session = orchestrator._get_session(pipeline_id)
         llm_config = session.get("data", {}).get("llm_config") if session else None
+        llm_config = llm_config or data.get("llm_config")
         if not session or not llm_config:
             return jsonify({"error": "A sessão expirou ou não foi encontrada. Inicie a pipeline novamente."}), 410
+        session["data"]["llm_config"] = llm_config
+
         def run_job():
             orchestrator.set_provider(**llm_config)
             return asyncio.run(orchestrator.run_full_pipeline_2(
