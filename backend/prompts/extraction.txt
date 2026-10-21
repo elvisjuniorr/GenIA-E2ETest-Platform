@@ -28,6 +28,7 @@ For each Test Case, return a list of relevant elements to implement the structur
 
 ### Important Notes:
 - Only include elements required to execute this test case successfully.
+- For every element, set `step_name` to the exact text of the corresponding `execution_steps[].step` from the structured module. Copy it verbatim; do not paraphrase, shorten, translate, or invent step names.
 - Return a clean, structured JSON array with the relevant elements only.
 
 Be precise, focused, and avoid redundancy.

@@ -361,6 +361,10 @@ class GenIAOrchestrator:
                     prompt_override=prompt_overrides.get("structuring"),
                     llm_override=llm_overrides.get("structuring"),
                 )
+                # The graph root should use the explicit UI field, not a title
+                # inferred from (or accidentally copied from) the test body.
+                if isinstance(test_name, str) and test_name.strip():
+                    structured.testCase = test_name.strip()
                 self.push_event(
                     "STAGE_DONE",
                     "structuring",

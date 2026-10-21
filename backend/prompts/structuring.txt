@@ -26,7 +26,7 @@ At this stage, `extracted_data` must be an empty list for all steps. It will be 
 
 MODEL SCHEMA:
 TestCaseModel:
-    testCase: str
+    testCase: str (the concise test case title only; never include URLs, numbered steps, descriptions, or the full input text)
     modules: List[ModuleModel]
 
 ModuleModel:
@@ -43,6 +43,8 @@ EXAMPLE:
 - If the next step says 'Enter username and password', start a new module with the login page URL.
 
 INSTRUCTIONS:
+- Set `testCase` to only the concise test case name/title. The application may replace it with the name explicitly provided by the user in the “Nome do teste” field.
+- Never put URLs, numbered instructions, or the full test description in `testCase`.
 - Separate steps by page (URL)
 - A navigation action = boundary between modules
 - Use one module per page (i.e., per URL)

@@ -6,6 +6,8 @@ import html
 import json
 import logging
 import re
+import unicodedata
+from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -283,10 +285,48 @@ def _map_extracted_data_to_steps(module: Module):
         elif isinstance(item, ExtractedElement):
             normalized_items.append(item)
 
-    for step in module.execution_steps:
-        matched_data = [item.model_copy() for item in normalized_items if item.step_name == step.step]
-        if matched_data:
-            step.extracted_data = matched_data
+    def normalize_step_name(value: Any) -> str:
+        text = unicodedata.normalize("NFKD", str(value or ""))
+        text = "".join(char for char in text if not unicodedata.combining(char))
+        return re.sub(r"[^a-z0-9]+", " ", text.casefold()).strip()
+
+    steps = list(module.execution_steps or [])
+    step_names = {id(step): normalize_step_name(step.step) for step in steps}
+    stop_words = {"a", "an", "and", "the", "to", "of", "on", "in", "is", "for", "with", "then", "please"}
+
+    def similarity(left: str, right: str) -> float:
+        left_tokens = {token for token in left.split() if token not in stop_words}
+        right_tokens = {token for token in right.split() if token not in stop_words}
+        if not left_tokens or not right_tokens:
+            return 0.0
+        overlap = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+        sequence = SequenceMatcher(None, left, right).ratio()
+        return 0.7 * overlap + 0.3 * sequence
+
+    # Always clear the extraction mapping first. Otherwise a refined snapshot can
+    # accidentally keep the old extraction data when the LLM changes a step label.
+    for step in steps:
+        step.extracted_data = []
+
+    for item in normalized_items:
+        item_step = normalize_step_name(item.step_name)
+        matches = [step for step in steps if item_step and step_names[id(step)] == item_step]
+        if not matches and item_step and steps:
+            # Extractors sometimes paraphrase a step_name. Associate it with the
+            # closest structured step when there is meaningful lexical overlap.
+            ranked_steps = sorted(
+                ((similarity(item_step, step_names[id(step)]), step) for step in steps),
+                key=lambda candidate: candidate[0],
+                reverse=True,
+            )
+            if ranked_steps and ranked_steps[0][0] >= 0.22:
+                matches = [ranked_steps[0][1]]
+        # A one-step module has an unambiguous destination even if the model
+        # substantially altered the label.
+        if not matches and len(steps) == 1:
+            matches = steps
+        for step in matches:
+            step.extracted_data.append(item.model_copy())
 
     return module
 

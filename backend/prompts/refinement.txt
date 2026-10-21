@@ -33,6 +33,7 @@ RULES:
 - Do not introduce a different framework or language.
 - Do not invent elements that are not supported by the provided extracted data and HTML snapshot.
 - Prefer keeping the existing elements and only adjust selectors or descriptions when necessary.
+- Preserve each element's `step_name` exactly as it appears in the existing extracted elements. Do not translate, rename, reformat, or change its capitalization; the pipeline uses it to associate elements with the structured execution step.
 - Treat the HTML snapshot as the authoritative page source for refinement. Do not request another crawl.
 - If no refinement is needed, return the original extracted elements as-is.
 - Do not return markdown, code fences, explanations, or extra keys.

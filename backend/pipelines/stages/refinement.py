@@ -71,7 +71,16 @@ class RefinementStage(PipelineStageRunner):
             },
         )
         raw = self.llm.generate_json(api_key, model, final_prompt, temperature=temperature)
-        return _normalize_extracted_elements(raw)
+        refined_elements = _normalize_extracted_elements(raw)
+        original_elements = list(module.extracted_data or [])
+        if original_elements and not refined_elements:
+            self.log(
+                "Refinement returned no elements; preserving the extracted elements for this module.",
+                level="warning",
+                stage="refinement",
+            )
+            return original_elements
+        return refined_elements
 
 
 __all__ = ["RefinementStage"]
